@@ -24,7 +24,7 @@ from markdownx.models import MarkdownxField
 
 from django_cleanup import cleanup
 
-from mptt.models import TreeForeignKey
+from mptt.models import TreeForeignKey, MPTTModel
 
 from stdimage.models import StdImageField
 
@@ -39,7 +39,7 @@ from InvenTree.models import InvenTreeTree, InvenTreeAttachment
 from InvenTree.fields import InvenTreeURLField
 from InvenTree.helpers import decimal2string, normalize
 
-from InvenTree.status_codes import BuildStatus, StockStatus, PurchaseOrderStatus
+from InvenTree.status_codes import BuildStatus, PurchaseOrderStatus
 
 from build import models as BuildModels
 from order import models as OrderModels
@@ -200,7 +200,7 @@ def match_part_names(match, threshold=80, reverse=True, compare_length=False):
 
 
 @cleanup.ignore
-class Part(models.Model):
+class Part(MPTTModel):
     """ The Part object represents an abstract part, the 'concept' of an actual entity.
 
     An actual physical instance of a Part is a StockItem which is treated separately.
@@ -236,8 +236,12 @@ class Part(models.Model):
     """
 
     class Meta:
-        verbose_name = "Part"
-        verbose_name_plural = "Parts"
+        verbose_name = _("Part")
+        verbose_name_plural = _("Parts")
+
+    class MPTTMeta:
+        # For legacy reasons the 'variant_of' field is used to indicate the MPTT parent
+        parent_attr = 'variant_of'
 
     def save(self, *args, **kwargs):
         """
@@ -261,6 +265,66 @@ class Part(models.Model):
 
     def __str__(self):
         return "{n} - {d}".format(n=self.full_name, d=self.description)
+
+    def checkIfSerialNumberExists(self, sn):
+        """
+        Check if a serial number exists for this Part.
+
+        Note: Serial numbers must be unique across an entire Part "tree",
+        so here we filter by the entire tree.
+        """
+
+        parts = Part.objects.filter(tree_id=self.tree_id)
+        stock = StockModels.StockItem.objects.filter(part__in=parts, serial=sn)
+
+        return stock.exists()
+
+    def getHighestSerialNumber(self):
+        """
+        Return the highest serial number for this Part.
+
+        Note: Serial numbers must be unique across an entire Part "tree",
+        so we filter by the entire tree.
+        """
+
+        parts = Part.objects.filter(tree_id=self.tree_id)
+        stock = StockModels.StockItem.objects.filter(part__in=parts).exclude(serial=None).order_by('-serial')
+
+        if stock.count() > 0:
+            return stock.first().serial
+        
+        # No serial numbers found
+        return None
+
+    def getNextSerialNumber(self):
+        """
+        Return the next-available serial number for this Part.
+        """
+
+        n = self.getHighestSerialNumber()
+
+        if n is None:
+            return 1
+        else:
+            return n + 1
+
+    def getSerialNumberString(self, quantity):
+        """
+        Return a formatted string representing the next available serial numbers,
+        given a certain quantity of items.
+        """
+
+        sn = self.getNextSerialNumber()
+
+        if quantity >= 2:
+            sn = "{n}-{m}".format(
+                n=sn,
+                m=int(sn + quantity - 1)
+            )
+        else:
+            sn = str(sn)
+
+        return sn
 
     @property
     def full_name(self):
@@ -638,32 +702,40 @@ class Part(models.Model):
             self.sales_order_allocation_count(),
         ])
 
-    @property
-    def stock_entries(self):
-        """ Return all 'in stock' items. To be in stock:
+    def stock_entries(self, include_variants=True, in_stock=None):
+        """ Return all stock entries for this Part.
 
-        - build_order is None
-        - sales_order is None
-        - belongs_to is None
+        - If this is a template part, include variants underneath this.
+
+        Note: To return all stock-entries for all part variants under this one,
+        we need to be creative with the filtering.
         """
 
-        return self.stock_items.filter(StockModels.StockItem.IN_STOCK_FILTER)
+        if include_variants:
+            query = StockModels.StockItem.objects.filter(part__in=self.get_descendants(include_self=True))
+        else:
+            query = self.stock_items
+
+        if in_stock is True:
+            query = query.filter(StockModels.StockItem.IN_STOCK_FILTER)
+        elif in_stock is False:
+            query = query.exclude(StockModels.StockItem.IN_STOCK_FILTER)
+
+        return query
 
     @property
     def total_stock(self):
         """ Return the total stock quantity for this part.
-        Part may be stored in multiple locations
+        
+        - Part may be stored in multiple locations
+        - If this part is a "template" (variants exist) then these are counted too
         """
 
-        if self.is_template:
-            total = sum([variant.total_stock for variant in self.variants.all()])
-        else:
-            total = self.stock_entries.filter(status__in=StockStatus.AVAILABLE_CODES).aggregate(total=Sum('quantity'))['total']
+        entries = self.stock_entries(in_stock=True)
 
-        if total:
-            return total
-        else:
-            return Decimal(0)
+        query = entries.aggregate(t=Coalesce(Sum('quantity'), Decimal(0)))
+
+        return query['t']
 
     @property
     def has_bom(self):
@@ -918,6 +990,30 @@ class Part(models.Model):
 
         self.save()
 
+    def getTestTemplates(self, required=None, include_parent=True):
+        """
+        Return a list of all test templates associated with this Part.
+        These are used for validation of a StockItem.
+
+        args:
+            required: Set to True or False to filter by "required" status
+            include_parent: Set to True to traverse upwards
+        """
+
+        if include_parent:
+            tests = PartTestTemplate.objects.filter(part__in=self.get_ancestors(include_self=True))
+        else:
+            tests = self.test_templates
+
+        if required is not None:
+            tests = tests.filter(required=required)
+
+        return tests
+    
+    def getRequiredTests(self):
+        # Return the tests which are required by this part
+        return self.getTestTemplates(required=True)
+
     @property
     def attachment_count(self):
         """ Count the number of attachments for this part.
@@ -1035,6 +1131,106 @@ class PartStar(models.Model):
 
     class Meta:
         unique_together = ['part', 'user']
+
+
+class PartTestTemplate(models.Model):
+    """
+    A PartTestTemplate defines a 'template' for a test which is required to be run
+    against a StockItem (an instance of the Part).
+
+    The test template applies "recursively" to part variants, allowing tests to be
+    defined in a heirarchy.
+
+    Test names are simply strings, rather than enforcing any sort of structure or pattern.
+    It is up to the user to determine what tests are defined (and how they are run).
+
+    To enable generation of unique lookup-keys for each test, there are some validation tests
+    run on the model (refer to the validate_unique function).
+    """
+
+    def save(self, *args, **kwargs):
+
+        self.clean()
+
+        super().save(*args, **kwargs)
+
+    def clean(self):
+
+        self.test_name = self.test_name.strip()
+
+        self.validate_unique()
+        super().clean()
+
+    def validate_unique(self, exclude=None):
+        """
+        Test that this test template is 'unique' within this part tree.
+        """
+
+        if not self.part.trackable:
+            raise ValidationError({
+                'part': _('Test templates can only be created for trackable parts')
+            })
+
+        # Get a list of all tests "above" this one
+        tests = PartTestTemplate.objects.filter(
+            part__in=self.part.get_ancestors(include_self=True)
+        )
+
+        # If this item is already in the database, exclude it from comparison!
+        if self.pk is not None:
+            tests = tests.exclude(pk=self.pk)
+
+        key = self.key
+
+        for test in tests:
+            if test.key == key:
+                raise ValidationError({
+                    'test_name': _("Test with this name already exists for this part")
+                })
+
+        super().validate_unique(exclude)
+
+    @property
+    def key(self):
+        """ Generate a key for this test """
+        return helpers.generateTestKey(self.test_name)
+
+    part = models.ForeignKey(
+        Part,
+        on_delete=models.CASCADE,
+        related_name='test_templates',
+        limit_choices_to={'trackable': True},
+    )
+
+    test_name = models.CharField(
+        blank=False, max_length=100,
+        verbose_name=_("Test Name"),
+        help_text=_("Enter a name for the test")
+    )
+
+    description = models.CharField(
+        blank=False, null=True, max_length=100,
+        verbose_name=_("Test Description"),
+        help_text=_("Enter description for this test")
+    )
+
+    required = models.BooleanField(
+        default=True,
+        verbose_name=_("Required"),
+        help_text=_("Is this test required to pass?")
+    )
+
+    requires_value = models.BooleanField(
+        default=False,
+        verbose_name=_("Requires Value"),
+        help_text=_("Does this test require a value when adding a test result?")
+    )
+
+    requires_attachment = models.BooleanField(
+        default=False,
+        verbose_name=_("Requires Attachment"),
+        help_text=_("Does this test require a file attachment when adding a test result?")
+    )
 
 
 class PartParameterTemplate(models.Model):

@@ -15,6 +15,7 @@ from django.utils.translation import ugettext as _
 from .models import Part, PartCategory, PartAttachment
 from .models import BomItem
 from .models import PartParameterTemplate, PartParameter
+from .models import PartTestTemplate
 
 from common.models import Currency
 
@@ -26,6 +27,22 @@ class PartImageForm(HelperForm):
         model = Part
         fields = [
             'image',
+        ]
+
+
+class EditPartTestTemplateForm(HelperForm):
+    """ Class for creating / editing a PartTestTemplate object """
+
+    class Meta:
+        model = PartTestTemplate
+
+        fields = [
+            'part',
+            'test_name',
+            'description',
+            'required',
+            'requires_value',
+            'requires_attachment',
         ]
 
 
@@ -97,6 +114,12 @@ class SetPartCategoryForm(forms.Form):
 class EditPartForm(HelperForm):
     """ Form for editing a Part object """
 
+    field_prefix = {
+        'keywords': 'fa-key',
+        'link': 'fa-link',
+        'IPN': 'fa-hashtag',
+    }
+
     deep_copy = forms.BooleanField(required=False,
                                    initial=True,
                                    help_text=_("Perform 'deep copy' which will duplicate all BOM data for this part"),
@@ -119,13 +142,11 @@ class EditPartForm(HelperForm):
             'revision',
             'keywords',
             'variant_of',
-            'is_template',
             'link',
             'default_location',
             'default_supplier',
             'units',
             'minimum_stock',
-            'active',
         ]
 
 
@@ -154,6 +175,10 @@ class EditPartParameterForm(HelperForm):
 
 class EditCategoryForm(HelperForm):
     """ Form for editing a PartCategory object """
+
+    field_prefix = {
+        'default_keywords': 'fa-key',
+    }
 
     class Meta:
         model = PartCategory

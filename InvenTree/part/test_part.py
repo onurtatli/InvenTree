@@ -5,10 +5,11 @@
 from __future__ import unicode_literals
 
 from django.test import TestCase
+from django.core.exceptions import ValidationError
 
 import os
 
-from .models import Part
+from .models import Part, PartTestTemplate
 from .models import rename_part_image, match_part_names
 from .templatetags import inventree_extras
 
@@ -52,6 +53,20 @@ class PartTest(TestCase):
 
         self.C1 = Part.objects.get(name='C_22N_0805')
 
+        Part.objects.rebuild()
+
+    def test_tree(self):
+        # Test that the part variant tree is working properly
+        chair = Part.objects.get(pk=10000)
+        self.assertEqual(chair.get_children().count(), 3)
+        self.assertEqual(chair.get_descendant_count(), 4)
+
+        green = Part.objects.get(pk=10004)
+        self.assertEqual(green.get_ancestors().count(), 2)
+        self.assertEqual(green.get_root(), chair)
+        self.assertEqual(green.get_family().count(), 3)
+        self.assertEqual(Part.objects.filter(tree_id=chair.tree_id).count(), 5)
+
     def test_str(self):
         p = Part.objects.get(pk=100)
         self.assertEqual(str(p), "BOB | Bob | A2 - Can we build it?")
@@ -91,3 +106,61 @@ class PartTest(TestCase):
         matches = match_part_names('M2x5 LPHS')
 
         self.assertTrue(len(matches) > 0)
+
+
+class TestTemplateTest(TestCase):
+
+    fixtures = [
+        'category',
+        'part',
+        'location',
+        'test_templates',
+    ]
+
+    def test_template_count(self):
+
+        chair = Part.objects.get(pk=10000)
+
+        # Tests for the top-level chair object (nothing above it!)
+        self.assertEqual(chair.test_templates.count(), 5)
+        self.assertEqual(chair.getTestTemplates().count(), 5)
+        self.assertEqual(chair.getTestTemplates(required=True).count(), 4)
+        self.assertEqual(chair.getTestTemplates(required=False).count(), 1)
+
+        # Test the lowest-level part which has more associated tests
+        variant = Part.objects.get(pk=10004)
+
+        self.assertEqual(variant.getTestTemplates().count(), 7)
+        self.assertEqual(variant.getTestTemplates(include_parent=False).count(), 1)
+        self.assertEqual(variant.getTestTemplates(required=True).count(), 5)
+
+    def test_uniqueness(self):
+        # Test names must be unique for this part and also parts above
+
+        variant = Part.objects.get(pk=10004)
+
+        with self.assertRaises(ValidationError):
+            PartTestTemplate.objects.create(
+                part=variant,
+                test_name='Record weight'
+            )
+
+        with self.assertRaises(ValidationError):
+            PartTestTemplate.objects.create(
+                part=variant,
+                test_name='Check that chair is especially green'
+            )
+
+        # Also should fail if we attempt to create a test that would generate the same key
+        with self.assertRaises(ValidationError):
+            PartTestTemplate.objects.create(
+                part=variant,
+                test_name='ReCoRD       weiGHT  '
+            )
+
+        # But we should be able to create a new one!
+        n = variant.getTestTemplates().count()
+
+        PartTestTemplate.objects.create(part=variant, test_name='A Sample Test')
+
+        self.assertEqual(variant.getTestTemplates().count(), n + 1)
