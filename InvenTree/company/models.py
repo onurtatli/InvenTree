@@ -411,8 +411,8 @@ class SupplierPart(models.Model):
         return [line.order for line in self.purchase_order_line_items.all().prefetch_related('order')]
 
     def __str__(self):
-        s = "{supplier} ({sku})".format(
-            sku=self.SKU,
+        s = "{supplier} ({p})".format(
+            p=self.part,
             supplier=self.supplier.name)
 
         if self.manufacturer_string:
