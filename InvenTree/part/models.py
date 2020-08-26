@@ -41,7 +41,6 @@ from InvenTree.helpers import decimal2string, normalize
 
 from InvenTree.status_codes import BuildStatus, PurchaseOrderStatus
 
-from report import models as ReportModels
 from build import models as BuildModels
 from order import models as OrderModels
 from company.models import SupplierPart
@@ -65,14 +64,14 @@ class PartCategory(InvenTreeTree):
         help_text=_('Default location for parts in this category')
     )
 
-    default_keywords = models.CharField(blank=True, max_length=250, help_text=_('Default keywords for parts in this category'))
+    default_keywords = models.CharField(null=True, blank=True, max_length=250, help_text=_('Default keywords for parts in this category'))
 
     def get_absolute_url(self):
         return reverse('category-detail', kwargs={'pk': self.id})
 
     class Meta:
-        verbose_name = "Part Category"
-        verbose_name_plural = "Part Categories"
+        verbose_name = _("Part Category")
+        verbose_name_plural = _("Part Categories")
 
     def get_parts(self, cascade=True):
         """ Return a queryset for all parts under this category.
@@ -239,6 +238,7 @@ class Part(MPTTModel):
     class Meta:
         verbose_name = _("Part")
         verbose_name_plural = _("Parts")
+        ordering = ['name', ]
 
     class MPTTMeta:
         # For legacy reasons the 'variant_of' field is used to indicate the MPTT parent
@@ -262,10 +262,49 @@ class Part(MPTTModel):
                 if n_refs == 0:
                     previous.image.delete(save=False)
 
+        self.clean()
+        self.validate_unique()
+
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return "{n} - {d}".format(n=self.full_name, d=self.description)
+        return f"{self.full_name} - {self.description}"
+
+    def checkAddToBOM(self, parent):
+        """
+        Check if this Part can be added to the BOM of another part.
+
+        This will fail if:
+
+        a) The parent part is the same as this one
+        b) The parent part is used in the BOM for *this* part
+        c) The parent part is used in the BOM for any child parts under this one
+        
+        Failing this check raises a ValidationError!
+
+        """
+
+        if parent is None:
+            return
+
+        if self.pk == parent.pk:
+            raise ValidationError({'sub_part': _("Part '{p1}' is  used in BOM for '{p2}' (recursive)".format(
+                p1=str(self),
+                p2=str(parent)
+            ))})
+
+        # Ensure that the parent part does not appear under any child BOM item!
+        for item in self.bom_items.all():
+
+            # Check for simple match
+            if item.sub_part == parent:
+                raise ValidationError({'sub_part': _("Part '{p1}' is  used in BOM for '{p2}' (recursive)".format(
+                    p1=str(parent),
+                    p2=str(self)
+                ))})
+
+            # And recursively check too
+            item.sub_part.checkAddToBOM(parent)
 
     def checkIfSerialNumberExists(self, sn):
         """
@@ -359,24 +398,6 @@ class Part(MPTTModel):
         self.category = category
         self.save()
 
-    def get_test_report_templates(self):
-        """
-        Return all the TestReport template objects which map to this Part.
-        """
-
-        templates = []
-
-        for report in ReportModels.TestReport.objects.all():
-            if report.matches_part(self):
-                templates.append(report)
-
-        return templates
-
-    def has_test_report_templates(self):
-        """ Return True if this part has a TestReport defined """
-
-        return len(self.get_test_report_templates()) > 0
-
     def get_absolute_url(self):
         """ Return the web URL for viewing this part """
         return reverse('part-detail', kwargs={'pk': self.id})
@@ -433,11 +454,7 @@ class Part(MPTTModel):
     def clean(self):
         """ Perform cleaning operations for the Part model """
 
-        if self.is_template and self.variant_of is not None:
-            raise ValidationError({
-                'is_template': _("Part cannot be a template part if it is a variant of another part"),
-                'variant_of': _("Part cannot be a variant of another part if it is already a template"),
-            })
+        super().clean()
 
     name = models.CharField(max_length=100, blank=False,
                             help_text=_('Part name'),
@@ -560,16 +577,17 @@ class Part(MPTTModel):
 
     responsible = models.ForeignKey(User, on_delete=models.SET_NULL, blank=True, null=True, related_name='parts_responible')
 
-    def format_barcode(self):
+    def format_barcode(self, **kwargs):
         """ Return a JSON string for formatting a barcode for this Part object """
 
         return helpers.MakeBarcode(
             "part",
+            self.id,
             {
-                "id": self.id,
                 "name": self.full_name,
                 "url": reverse('api-part-detail', kwargs={'pk': self.id}),
-            }
+            },
+            **kwargs
         )
 
     @property
@@ -595,7 +613,16 @@ class Part(MPTTModel):
     def quantity_to_order(self):
         """ Return the quantity needing to be ordered for this part. """
 
-        required = -1 * self.net_stock
+        # How many do we need to have "on hand" at any point?
+        required = self.net_stock - self.minimum_stock
+
+        if required < 0:
+            return abs(required)
+
+        # Do not need to order any
+        return 0
+
+        required = self.net_stock
         return max(required, 0)
 
     @property
@@ -644,11 +671,20 @@ class Part(MPTTModel):
         # Calculate the minimum number of parts that can be built using each sub-part
         for item in self.bom_items.all().prefetch_related('sub_part__stock_items'):
             stock = item.sub_part.available_stock
+
+            # If (by some chance) we get here but the BOM item quantity is invalid,
+            # ignore!
+            if item.quantity <= 0:
+                continue
+
             n = int(stock / item.quantity)
 
             if total is None or n < total:
                 total = n
 
+        if total is None:
+            total = 0
+        
         return max(total, 0)
 
     @property
@@ -1033,6 +1069,9 @@ class Part(MPTTModel):
         # Return the tests which are required by this part
         return self.getTestTemplates(required=True)
 
+    def requiredTestCount(self):
+        return self.getRequiredTests().count()
+
     @property
     def attachment_count(self):
         """ Count the number of attachments for this part.
@@ -1105,6 +1144,17 @@ class Part(MPTTModel):
         """ Return all parameters for this part, ordered by name """
 
         return self.parameters.order_by('template__name')
+
+    @property
+    def has_variants(self):
+        """ Check if this Part object has variants underneath it. """
+
+        return self.get_all_variants().count() > 0
+
+    def get_all_variants(self):
+        """ Return all Part object which exist as a variant under this part. """
+
+        return self.get_descendants(include_self=False)
 
 
 def attach_file(instance, filename):
@@ -1324,7 +1374,7 @@ class PartParameter(models.Model):
 class BomItem(models.Model):
     """ A BomItem links a part to its component items.
     A part can have a BOM (bill of materials) which defines
-    which parts are required (and in what quatity) to make it.
+    which parts are required (and in what quantity) to make it.
 
     Attributes:
         part: Link to the parent part (the part that will be produced)
@@ -1336,6 +1386,11 @@ class BomItem(models.Model):
         checksum: Validation checksum for the particular BOM line item
     """
 
+    def save(self, *args, **kwargs):
+
+        self.clean()
+        super().save(*args, **kwargs)
+
     def get_absolute_url(self):
         return reverse('bom-item-detail', kwargs={'pk': self.id})
 
@@ -1345,7 +1400,6 @@ class BomItem(models.Model):
                              help_text=_('Select parent part'),
                              limit_choices_to={
                                  'assembly': True,
-                                 'is_template': False,
                              })
 
     # A link to the child item (sub-part)
@@ -1354,7 +1408,6 @@ class BomItem(models.Model):
                                  help_text=_('Select part to be used in BOM'),
                                  limit_choices_to={
                                      'component': True,
-                                     'is_template': False,
                                  })
 
     # Quantity required
@@ -1428,25 +1481,21 @@ class BomItem(models.Model):
         - A part cannot refer to a part which refers to it
         """
 
-        # A part cannot refer to itself in its BOM
+        # If the sub_part is 'trackable' then the 'quantity' field must be an integer
         try:
-            if self.sub_part is not None and self.part is not None:
-                if self.part == self.sub_part:
-                    raise ValidationError({'sub_part': _('Part cannot be added to its own Bill of Materials')})
-        
-            # TODO - Make sure that there is no recusion
-
-            # Test for simple recursion
-            for item in self.sub_part.bom_items.all():
-                if self.part == item.sub_part:
-                    raise ValidationError({'sub_part': _("Part '{p1}' is  used in BOM for '{p2}' (recursive)".format(p1=str(self.part), p2=str(self.sub_part)))})
-        
+            if self.sub_part.trackable:
+                if not self.quantity == int(self.quantity):
+                    raise ValidationError({
+                        "quantity": _("Quantity must be integer value for trackable parts")
+                    })
         except Part.DoesNotExist:
-            # A blank Part will be caught elsewhere
             pass
 
+        # Check for circular BOM references
+        self.sub_part.checkAddToBOM(self.part)
+
     class Meta:
-        verbose_name = "BOM Item"
+        verbose_name = _("BOM Item")
 
         # Prevent duplication of parent/child rows
         unique_together = ('part', 'sub_part')

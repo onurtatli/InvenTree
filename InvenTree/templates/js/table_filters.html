@@ -11,28 +11,73 @@ function getAvailableTableFilters(tableKey) {
 
     tableKey = tableKey.toLowerCase();
 
+    // Filters for the "customer stock" table (really a subset of "stock")
+    if (tableKey == "customerstock") {
+        return {
+            serialized: {
+                type: 'bool',
+                title: '{% trans "Is Serialized" %}',
+            },
+            serial_gte: {
+                title: "{% trans "Serial number GTE" %}",
+                description: "{% trans "Serial number greater than or equal to" %}"
+            },
+            serial_lte: {
+                title: "{% trans "Serial number LTE" %}",
+                description: "{% trans "Serial number less than or equal to" %}",
+            },
+        };
+    }
+
     // Filters for the "Stock" table
     if (tableKey == 'stock') {
         return {
-            cascade: {
-                type: 'bool',
-                title: '{% trans "Include sublocations" %}',
-                description: '{% trans "Include stock in sublocations" %}',
-            },
             active: {
                 type: 'bool',
                 title: '{% trans "Active parts" %}',
                 description: '{% trans "Show stock for active parts" %}',
             },
-            status: {
-                options: stockCodes,
-                title: '{% trans "Stock status" %}',
-                description: '{% trans "Stock status" %}',
-            },
             allocated: {
                 type: 'bool',
                 title: '{% trans "Is allocated" %}',
                 description: '{% trans "Item has been alloacted" %}',
+            },
+            cascade: {
+                type: 'bool',
+                title: '{% trans "Include sublocations" %}',
+                description: '{% trans "Include stock in sublocations" %}',
+            },
+            depleted: {
+                type: 'bool',
+                title: '{% trans "Depleted" %}',
+                description: '{% trans "Show stock items which are depleted" %}',
+            },
+            in_stock: {
+                type: 'bool',
+                title: '{% trans "In Stock" %}',
+                description: '{% trans "Show items which are in stock" %}',
+            },
+            sent_to_customer: {
+                type: 'bool',
+                title: '{% trans "Sent to customer" %}',
+                description: '{% trans "Show items which have been assigned to a customer" %}',
+            },
+            serialized: {
+                type: 'bool',
+                title: '{% trans "Is Serialized" %}',
+            },
+            serial_gte: {
+                title: "{% trans "Serial number GTE" %}",
+                description: "{% trans "Serial number greater than or equal to" %}"
+            },
+            serial_lte: {
+                title: "{% trans "Serial number LTE" %}",
+                description: "{% trans "Serial number less than or equal to" %}",
+            },
+            status: {
+                options: stockCodes,
+                title: '{% trans "Stock status" %}',
+                description: '{% trans "Stock status" %}',
             },
         };
     }
@@ -70,10 +115,15 @@ function getAvailableTableFilters(tableKey) {
 
     // Filters for the "Order" table
     if (tableKey == "purchaseorder") {
+
         return {
             status: {
                 title: '{% trans "Order status" %}',
                 options: purchaseOrderCodes,
+            },
+            outstanding: {
+                type: 'bool',
+                title: '{% trans "Outstanding" %}',
             },
         };
     }
@@ -83,6 +133,10 @@ function getAvailableTableFilters(tableKey) {
             status: {
                 title: '{% trans "Order status" %}',
                 options: salesOrderCodes,
+            },
+            outstanding: {
+                type: 'bool',
+                title: '{% trans "Outstanding" %}',
             },
         };
     }

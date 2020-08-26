@@ -4,10 +4,6 @@ import inspect
 import importlib
 import pkgutil
 
-# Barcode plugins
-import plugins.barcode as barcode
-from plugins.barcode.barcode import BarcodePlugin
-
 # Action plugins
 import plugins.action as action
 from plugins.action.action import ActionPlugin
@@ -47,24 +43,6 @@ def get_plugins(pkg, baseclass):
             plugin = item[1]
             if issubclass(plugin, baseclass) and plugin.PLUGIN_NAME:
                 plugins.append(plugin)
-
-    return plugins
-
-
-def load_barcode_plugins():
-    """
-    Return a list of all registered barcode plugins
-    """
-
-    print("Loading barcode plugins")
-
-    plugins = get_plugins(barcode, BarcodePlugin)
-
-    if len(plugins) > 0:
-        print("Discovered {n} barcode plugins:".format(n=len(plugins)))
-
-        for bp in plugins:
-            print(" - {bp}".format(bp=bp.PLUGIN_NAME))
 
     return plugins
 

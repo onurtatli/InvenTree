@@ -23,6 +23,7 @@ def get_classes(module):
 def get_plugins(pkg, baseclass):
     """
     Return a list of all modules under a given package.
+
     - Modules must be a subclass of the provided 'baseclass'
     - Modules must have a non-empty PLUGIN_NAME parameter
     """

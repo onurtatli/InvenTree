@@ -15,6 +15,8 @@ from InvenTree.helpers import GetExportFormats
 from InvenTree.forms import HelperForm
 from InvenTree.fields import RoundingDecimalFormField
 
+from report.models import TestReport
+
 from .models import StockLocation, StockItem, StockItemTracking
 from .models import StockItemAttachment
 from .models import StockItemTestResult
@@ -31,6 +33,30 @@ class EditStockItemAttachmentForm(HelperForm):
             'stock_item',
             'attachment',
             'comment'
+        ]
+
+
+class AssignStockItemToCustomerForm(HelperForm):
+    """
+    Form for manually assigning a StockItem to a Customer
+    """
+
+    class Meta:
+        model = StockItem
+        fields = [
+            'customer',
+        ]
+
+
+class ReturnStockItemForm(HelperForm):
+    """
+    Form for manually returning a StockItem into stock
+    """
+
+    class Meta:
+        model = StockItem
+        fields = [
+            'location',
         ]
 
 
@@ -60,6 +86,18 @@ class EditStockLocationForm(HelperForm):
             'name',
             'parent',
             'description'
+        ]
+
+
+class ConvertStockItemForm(HelperForm):
+    """
+    Form for converting a StockItem to a variant of its current part.
+    """
+
+    class Meta:
+        model = StockItem
+        fields = [
+            'part'
         ]
 
 
@@ -141,6 +179,38 @@ class SerializeStockForm(HelperForm):
             'note',
         ]
 
+
+class StockItemLabelSelectForm(HelperForm):
+    """ Form for selecting a label template for a StockItem """
+
+    label = forms.ChoiceField(
+        label=_('Label'),
+        help_text=_('Select test report template')
+    )
+
+    class Meta:
+        model = StockItem
+        fields = [
+            'label',
+        ]
+
+    def get_label_choices(self, labels):
+
+        choices = []
+
+        if len(labels) > 0:
+            for label in labels:
+                choices.append((label.pk, label))
+
+        return choices
+
+    def __init__(self, labels, *args, **kwargs):
+
+        super().__init__(*args, **kwargs)
+
+        self.fields['label'].choices = self.get_label_choices(labels)
+
+
 class TestReportFormatForm(HelperForm):
     """ Form for selection a test report template """
 
@@ -157,17 +227,21 @@ class TestReportFormatForm(HelperForm):
         self.fields['template'].choices = self.get_template_choices()
     
     def get_template_choices(self):
-        """ Available choices """
+        """
+        Generate a list of of TestReport options for the StockItem
+        """
 
         choices = []
 
-        for report in self.stock_item.part.get_test_report_templates():
-            choices.append((report.pk, report))
+        templates = TestReport.objects.filter(enabled=True)
+
+        for template in templates:
+            if template.matches_stock_item(self.stock_item):
+                choices.append((template.pk, template))
 
         return choices
 
     template = forms.ChoiceField(label=_('Template'), help_text=_('Select test report template'))
-
 
 
 class ExportOptionsForm(HelperForm):

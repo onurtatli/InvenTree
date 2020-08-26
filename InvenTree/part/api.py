@@ -190,7 +190,22 @@ class PartThumbs(generics.ListAPIView):
         return Response(data)
 
 
-class PartDetail(generics.RetrieveUpdateAPIView):
+class PartThumbsUpdate(generics.RetrieveUpdateAPIView):
+    """ API endpoint for updating Part thumbnails"""
+
+    queryset = Part.objects.all()
+    serializer_class = part_serializers.PartThumbSerializerUpdate
+
+    permission_classes = [
+        permissions.IsAuthenticated,
+    ]
+
+    filter_backends = [
+        DjangoFilterBackend
+    ]
+
+
+class PartDetail(generics.RetrieveUpdateDestroyAPIView):
     """ API endpoint for detail view of a single Part object """
 
     queryset = Part.objects.all()
@@ -228,6 +243,18 @@ class PartDetail(generics.RetrieveUpdateAPIView):
         kwargs['starred_parts'] = self.starred_parts
 
         return self.serializer_class(*args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        # Retrieve part
+        part = Part.objects.get(pk=int(kwargs['pk']))
+        # Check if inactive
+        if not part.active:
+            # Delete
+            return super(PartDetail, self).destroy(request, *args, **kwargs)
+        else:
+            # Return 405 error
+            message = f'Part \'{part.name}\' (pk = {part.pk}) is active: cannot delete'
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED, data=message)
 
 
 class PartList(generics.ListCreateAPIView):
@@ -363,9 +390,10 @@ class PartList(generics.ListCreateAPIView):
         queryset = super().filter_queryset(queryset)
 
         # Filter by 'starred' parts?
-        starred = str2bool(self.request.query_params.get('starred', None))
+        starred = self.request.query_params.get('starred', None)
 
         if starred is not None:
+            starred = str2bool(starred)
             starred_parts = [star.part.pk for star in self.request.user.starred_parts.all()]
 
             if starred:
@@ -575,7 +603,20 @@ class BomList(generics.ListCreateAPIView):
     """
 
     serializer_class = part_serializers.BomItemSerializer
-    
+
+    def list(self, request, *args, **kwargs):
+
+        queryset = self.filter_queryset(self.get_queryset())
+
+        serializer = self.get_serializer(queryset, many=True)
+
+        data = serializer.data
+
+        if request.is_ajax():
+            return JsonResponse(data, safe=False)
+        else:
+            return Response(data)
+
     def get_serializer(self, *args, **kwargs):
 
         # Do we wish to include extra detail?
@@ -594,8 +635,10 @@ class BomList(generics.ListCreateAPIView):
         
         return self.serializer_class(*args, **kwargs)
 
-    def get_queryset(self):
+    def get_queryset(self, *args, **kwargs):
+
         queryset = BomItem.objects.all()
+
         queryset = self.get_serializer_class().setup_eager_loading(queryset)
 
         return queryset
@@ -703,7 +746,10 @@ part_api_urls = [
         url(r'^.*$', PartParameterList.as_view(), name='api-part-param-list'),
     ])),
 
-    url(r'^thumbs/', PartThumbs.as_view(), name='api-part-thumbs'),
+    url(r'^thumbs/', include([
+        url(r'^$', PartThumbs.as_view(), name='api-part-thumbs'),
+        url(r'^(?P<pk>\d+)/?', PartThumbsUpdate.as_view(), name='api-part-thumbs-update'),
+    ])),
 
     url(r'^(?P<pk>\d+)/?', PartDetail.as_view(), name='api-part-detail'),
 

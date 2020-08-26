@@ -6,17 +6,48 @@ Report template model definitions
 from __future__ import unicode_literals
 
 import os
+import sys
+
+import datetime
 
 from django.db import models
+from django.conf import settings
+
 from django.core.validators import FileExtensionValidator
 from django.core.exceptions import ValidationError
 
+from stock.models import StockItem
+
+from InvenTree.helpers import validateFilterString
+
 from django.utils.translation import gettext_lazy as _
 
-from part import models as PartModels
+try:
+    from django_weasyprint import WeasyTemplateResponseMixin
+except OSError as err:
+    print("OSError: {e}".format(e=err))
+    print("You may require some further system packages to be installed.")
+    sys.exit(1)
 
-from django_tex.shortcuts import render_to_pdf
-from django_weasyprint import WeasyTemplateResponseMixin
+# Conditional import if LaTeX templating is enabled
+if settings.LATEX_ENABLED:
+    try:
+        from django_tex.shortcuts import render_to_pdf
+        from django_tex.core import render_template_with_context
+        from django_tex.exceptions import TexError
+    except OSError as err:
+        print("OSError: {e}".format(e=err))
+        print("You may not have a working LaTeX toolchain installed?")
+        sys.exit(1)
+
+from django.http import HttpResponse
+
+
+class TexResponse(HttpResponse):
+    def __init__(self, content, filename=None):
+        super().__init__(content_type="application/txt")
+        self["Content-Disposition"] = 'filename="{}"'.format(filename)
+        self.write(content)
 
 
 def rename_template(instance, filename):
@@ -24,54 +55,6 @@ def rename_template(instance, filename):
     filename = os.path.basename(filename)
 
     return os.path.join('report', 'report_template', instance.getSubdir(), filename)
-
-
-def validateFilterString(value):
-    """
-    Validate that a provided filter string looks like a list of comma-separated key=value pairs
-    These should nominally match to a valid database filter based on the model being filtered.
-    e.g. "category=6, IPN=12"
-    e.g. "part__name=widget"
-    The ReportTemplate class uses the filter string to work out which items a given report applies to.
-    For example, an acceptance test report template might only apply to stock items with a given IPN,
-    so the string could be set to:
-    filters = "IPN = ACME0001"
-    Returns a map of key:value pairs
-    """
-
-    # Empty results map
-    results = {}
-
-    value = str(value).strip()
-
-    if not value or len(value) == 0:
-        return results
-
-    groups = value.split(',')
-
-    for group in groups:
-        group = group.strip()
-
-        pair = group.split('=')
-
-        if not len(pair) == 2:
-            raise ValidationError(
-                "Invalid group: {g}".format(g=group)
-            )
-
-        k, v = pair
-
-        k = k.strip()
-        v = v.strip()
-
-        if not k or not v:
-            raise ValidationError(
-                "Invalid group: {g}".format(g=group)
-            )
-
-        results[k] = v
-
-    return results
 
 
 class WeasyprintReportMixin(WeasyTemplateResponseMixin):
@@ -118,6 +101,7 @@ class ReportTemplateBase(models.Model):
     def render(self, request, **kwargs):
         """
         Render the template to a PDF file.
+
         Supported template formats:
             .tex - Uses django-tex plugin to render LaTeX template against an installed LaTeX engine
             .html - Uses django-weasyprint plugin to render HTML template against Weasyprint
@@ -128,10 +112,22 @@ class ReportTemplateBase(models.Model):
         context = self.get_context_data(request)
 
         context['request'] = request
+        context['user'] = request.user
+        context['datetime'] = datetime.datetime.now()
 
         if self.extension == '.tex':
             # Render LaTeX template to PDF
-            return render_to_pdf(request, self.template_name, context, filename=filename)
+            if settings.LATEX_ENABLED:
+                # Attempt to render to LaTeX template
+                # If there is a rendering error, return the (partially rendered) template,
+                # so at least we can debug what is going on
+                try:
+                    rendered = render_template_with_context(self.template_name, context)
+                    return render_to_pdf(request, self.template_name, context, filename=filename)
+                except TexError:
+                    return TexResponse(rendered, filename="error.tex")
+            else:
+                return ValidationError("Enable LaTeX support in config.yaml")
         elif self.extension in ['.htm', '.html']:
             # Render HTML template to PDF
             wp = WeasyprintReportMixin(request, self.template_name, **kwargs)
@@ -151,54 +147,24 @@ class ReportTemplateBase(models.Model):
 
     description = models.CharField(max_length=250, help_text=_("Report template description"))
 
-    class Meta:
-        abstract = True
+    enabled = models.BooleanField(
+        default=True,
+        help_text=_('Report template is enabled'),
+        verbose_name=_('Enabled')
+    )
 
-
-class ReportTemplate(ReportTemplateBase):
-    """
-    A simple reporting template which is used to upload template files,
-    which can then be used in other concrete template classes.
-    """
-
-    pass
-
-
-class PartFilterMixin(models.Model):
-    """
-    A model mixin used for matching a report type against a Part object.
-    Used to assign a report to a given part using custom filters.
-    """
-
-    class Meta:
-        abstract = True
-
-    def matches_part(self, part):
-        """
-        Test if this report matches a given part.
-        """
-
-        filters = self.get_part_filters()
-
-        parts = PartModels.Part.objects.filter(**filters)
-
-        parts = parts.filter(pk=part.pk)
-
-        return parts.exists()
-
-    def get_part_filters(self):
-        """ Return a map of filters to be used for Part filtering """
-        return validateFilterString(self.part_filters)
-
-    part_filters = models.CharField(
+    filters = models.CharField(
         blank=True,
         max_length=250,
         help_text=_("Part query filters (comma-separated list of key=value pairs)"),
         validators=[validateFilterString]
     )
 
+    class Meta:
+        abstract = True
 
-class TestReport(ReportTemplateBase, PartFilterMixin):
+
+class TestReport(ReportTemplateBase):
     """
     Render a TestReport against a StockItem object.
     """
@@ -208,6 +174,17 @@ class TestReport(ReportTemplateBase, PartFilterMixin):
 
     # Requires a stock_item object to be given to it before rendering
     stock_item = None
+
+    def matches_stock_item(self, item):
+        """
+        Test if this report template matches a given StockItem objects
+        """
+
+        filters = validateFilterString(self.filters)
+
+        items = StockItem.objects.filter(**filters)
+
+        return items.exists()
 
     def get_context_data(self, request):
         return {

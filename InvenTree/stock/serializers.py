@@ -15,6 +15,7 @@ from django.db.models.functions import Coalesce
 from company.serializers import SupplierPartSerializer
 from part.serializers import PartBriefSerializer
 from InvenTree.serializers import UserSerializerBrief, InvenTreeModelSerializer
+from InvenTree.serializers import InvenTreeAttachmentSerializerField
 
 
 class LocationBriefSerializer(InvenTreeModelSerializer):
@@ -70,6 +71,7 @@ class StockItemSerializer(InvenTreeModelSerializer):
             'belongs_to',
             'build',
             'build_order',
+            'customer',
             'sales_order',
             'supplier_part',
             'supplier_part__supplier',
@@ -97,22 +99,46 @@ class StockItemSerializer(InvenTreeModelSerializer):
 
         return queryset
 
+    belongs_to = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    build_order = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    customer = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    location = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    in_stock = serializers.BooleanField(read_only=True)
+
+    sales_order = serializers.PrimaryKeyRelatedField(read_only=True)
+
     status_text = serializers.CharField(source='get_status_display', read_only=True)
     
-    part_detail = PartBriefSerializer(source='part', many=False, read_only=True)
-    location_detail = LocationBriefSerializer(source='location', many=False, read_only=True)
+    supplier_part = serializers.PrimaryKeyRelatedField(read_only=True)
+    
     supplier_part_detail = SupplierPartSerializer(source='supplier_part', many=False, read_only=True)
 
-    tracking_items = serializers.IntegerField()
+    part = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    part_detail = PartBriefSerializer(source='part', many=False, read_only=True)
+
+    location_detail = LocationBriefSerializer(source='location', many=False, read_only=True)
+
+    tracking_items = serializers.IntegerField(source='tracking_info_count', read_only=True, required=False)
 
     quantity = serializers.FloatField()
-    allocated = serializers.FloatField()
+    
+    allocated = serializers.FloatField(source='allocation_count', required=False)
+
+    serial = serializers.IntegerField(required=False)
+
+    required_tests = serializers.IntegerField(source='required_test_count', read_only=True, required=False)
 
     def __init__(self, *args, **kwargs):
 
         part_detail = kwargs.pop('part_detail', False)
         location_detail = kwargs.pop('location_detail', False)
         supplier_part_detail = kwargs.pop('supplier_part_detail', False)
+        test_detail = kwargs.pop('test_detail', False)
 
         super(StockItemSerializer, self).__init__(*args, **kwargs)
 
@@ -125,13 +151,17 @@ class StockItemSerializer(InvenTreeModelSerializer):
         if supplier_part_detail is not True:
             self.fields.pop('supplier_part_detail')
 
+        if test_detail is not True:
+            self.fields.pop('required_tests')
+
     class Meta:
         model = StockItem
         fields = [
             'allocated',
             'batch',
-            'build_order',
             'belongs_to',
+            'customer',
+            'build_order',
             'in_stock',
             'link',
             'location',
@@ -141,12 +171,13 @@ class StockItemSerializer(InvenTreeModelSerializer):
             'part_detail',
             'pk',
             'quantity',
+            'required_tests',
             'sales_order',
             'serial',
-            'supplier_part',
-            'supplier_part_detail',
             'status',
             'status_text',
+            'supplier_part',
+            'supplier_part_detail',
             'tracking_items',
             'uid',
         ]
@@ -204,6 +235,8 @@ class StockItemAttachmentSerializer(InvenTreeModelSerializer):
 
     user_detail = UserSerializerBrief(source='user', read_only=True)
 
+    attachment = InvenTreeAttachmentSerializerField(required=True)
+
     class Meta:
         model = StockItemAttachment
 
@@ -217,24 +250,29 @@ class StockItemAttachmentSerializer(InvenTreeModelSerializer):
             'user_detail',
         ]
 
+        read_only_fields = [
+            'upload_date',
+            'user',
+            'user_detail'
+        ]
+
 
 class StockItemTestResultSerializer(InvenTreeModelSerializer):
     """ Serializer for the StockItemTestResult model """
 
     user_detail = UserSerializerBrief(source='user', read_only=True)
-    attachment_detail = StockItemAttachmentSerializer(source='attachment', read_only=True)
+
+    key = serializers.CharField(read_only=True)
+
+    attachment = InvenTreeAttachmentSerializerField(required=False)
 
     def __init__(self, *args, **kwargs):
         user_detail = kwargs.pop('user_detail', False)
-        attachment_detail = kwargs.pop('attachment_detail', False)
 
         super().__init__(*args, **kwargs)
 
         if user_detail is not True:
             self.fields.pop('user_detail')
-
-        if attachment_detail is not True:
-            self.fields.pop('attachment_detail')
 
     class Meta:
         model = StockItemTestResult
@@ -242,11 +280,11 @@ class StockItemTestResultSerializer(InvenTreeModelSerializer):
         fields = [
             'pk',
             'stock_item',
+            'key',
             'test',
             'result',
             'value',
             'attachment',
-            'attachment_detail',
             'notes',
             'user',
             'user_detail',
@@ -255,7 +293,6 @@ class StockItemTestResultSerializer(InvenTreeModelSerializer):
 
         read_only_fields = [
             'pk',
-            'attachment',
             'user',
             'date',
         ]

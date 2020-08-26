@@ -28,6 +28,7 @@ from datetime import datetime
 from company.models import Company, SupplierPart
 from part.models import Part
 from report.models import TestReport
+from label.models import StockItemLabel
 from .models import StockItem, StockLocation, StockItemTracking, StockItemAttachment, StockItemTestResult
 
 from .admin import StockItemResource
@@ -223,6 +224,161 @@ class StockItemAttachmentDelete(AjaxDeleteView):
         }
 
 
+class StockItemAssignToCustomer(AjaxUpdateView):
+    """
+    View for manually assigning a StockItem to a Customer
+    """
+
+    model = StockItem
+    ajax_form_title = _("Assign to Customer")
+    context_object_name = "item"
+    form_class = StockForms.AssignStockItemToCustomerForm
+
+    def post(self, request, *args, **kwargs):
+
+        customer = request.POST.get('customer', None)
+
+        if customer:
+            try:
+                customer = Company.objects.get(pk=customer)
+            except (ValueError, Company.DoesNotExist):
+                customer = None
+
+        if customer is not None:
+            stock_item = self.get_object()
+
+            item = stock_item.allocateToCustomer(
+                customer,
+                user=request.user
+            )
+
+            item.clearAllocations()
+
+        data = {
+            'form_valid': True,
+        }
+
+        return self.renderJsonResponse(request, self.get_form(), data)
+
+
+class StockItemReturnToStock(AjaxUpdateView):
+    """
+    View for returning a stock item (which is assigned to a customer) to stock.
+    """
+
+    model = StockItem
+    ajax_form_title = _("Return to Stock")
+    context_object_name = "item"
+    form_class = StockForms.ReturnStockItemForm
+
+    def post(self, request, *args, **kwargs):
+
+        location = request.POST.get('location', None)
+
+        if location:
+            try:
+                location = StockLocation.objects.get(pk=location)
+            except (ValueError, StockLocation.DoesNotExist):
+                location = None
+
+        if location:
+            stock_item = self.get_object()
+
+            stock_item.returnFromCustomer(location, request.user)
+        else:
+            raise ValidationError({'location': _("Specify a valid location")})
+
+        data = {
+            'form_valid': True,
+            'success': _("Stock item returned from customer")
+        }
+
+        return self.renderJsonResponse(request, self.get_form(), data)
+
+
+class StockItemSelectLabels(AjaxView):
+    """
+    View for selecting a template for printing labels for one (or more) StockItem objects
+    """
+
+    model = StockItem
+    ajax_form_title = _('Select Label Template')
+
+    def get_form(self):
+
+        item = StockItem.objects.get(pk=self.kwargs['pk'])
+
+        labels = []
+
+        # Construct a list of StockItemLabel objects which are enabled, and the filters match the selected StockItem
+        for label in StockItemLabel.objects.filter(enabled=True):
+            if label.matches_stock_item(item):
+                labels.append(label)
+
+        return StockForms.StockItemLabelSelectForm(labels)
+
+    def post(self, request, *args, **kwargs):
+
+        label = request.POST.get('label', None)
+
+        try:
+            label = StockItemLabel.objects.get(pk=label)
+        except (ValueError, StockItemLabel.DoesNotExist):
+            raise ValidationError({'label': _("Select valid label")})
+    
+        stock_item = StockItem.objects.get(pk=self.kwargs['pk'])
+
+        url = reverse('stock-item-print-labels')
+
+        url += '?label={pk}'.format(pk=label.pk)
+        url += '&items[]={pk}'.format(pk=stock_item.pk)
+
+        data = {
+            'form_valid': True,
+            'url': url,
+        }
+
+        return self.renderJsonResponse(request, self.get_form(), data=data)
+
+
+class StockItemPrintLabels(AjaxView):
+    """
+    View for printing labels and returning a PDF
+
+    Requires the following arguments to be passed as URL params:
+
+    items: List of valid StockItem pk values
+    label: Valid pk of a StockItemLabel template
+    """
+
+    def get(self, request, *args, **kwargs):
+
+        label = request.GET.get('label', None)
+
+        try:
+            label = StockItemLabel.objects.get(pk=label)
+        except (ValueError, StockItemLabel.DoesNotExist):
+            raise ValidationError({'label': 'Invalid label ID'})
+
+        item_pks = request.GET.getlist('items[]')
+
+        items = []
+
+        for pk in item_pks:
+            try:
+                item = StockItem.objects.get(pk=pk)
+                items.append(item)
+            except (ValueError, StockItem.DoesNotExist):
+                pass
+
+        if len(items) == 0:
+            raise ValidationError({'items': 'Must provide valid stockitems'})
+
+        pdf = label.render(items).getbuffer()
+
+        return DownloadFile(pdf, 'stock_labels.pdf', content_type='application/pdf')
+
+
 class StockItemDeleteTestData(AjaxUpdateView):
     """
     View for deleting all test data
@@ -292,17 +448,6 @@ class StockItemTestResultCreate(AjaxCreateView):
         form = super().get_form()
         form.fields['stock_item'].widget = HiddenInput()
 
-        # Extract the StockItem object
-        item_id = form['stock_item'].value()
-
-        # Limit the options for the file attachments
-        try:
-            stock_item = StockItem.objects.get(pk=item_id)
-            form.fields['attachment'].queryset = stock_item.attachments.all()
-        except (ValueError, StockItem.DoesNotExist):
-            # Hide the attachments field
-            form.fields['attachment'].widget = HiddenInput()
-
         return form
 
 
@@ -320,8 +465,6 @@ class StockItemTestResultEdit(AjaxUpdateView):
         form = super().get_form()
 
         form.fields['stock_item'].widget = HiddenInput()
-
-        form.fields['attachment'].queryset = self.object.stock_item.attachments.all()
         
         return form
 
@@ -382,6 +525,7 @@ class StockItemTestReportDownload(AjaxView):
 
     stock_item - Valid PK of a StockItem object
     template - Valid PK of a TestReport template object
+
     """
 
     def get(self, request, *args, **kwargs):
@@ -402,7 +546,6 @@ class StockItemTestReportDownload(AjaxView):
         template.stock_item = stock_item
 
         return template.render(request)
-
 
 
 class StockExportOptions(AjaxView):
@@ -900,6 +1043,30 @@ class StockItemEdit(AjaxUpdateView):
         return form
 
 
+class StockItemConvert(AjaxUpdateView):
+    """
+    View for 'converting' a StockItem to a variant of its current part.
+    """
+
+    model = StockItem
+    form_class = StockForms.ConvertStockItemForm
+    ajax_form_title = _('Convert Stock Item')
+    ajax_template_name = 'stock/stockitem_convert.html'
+    context_object_name = 'item'
+
+    def get_form(self):
+        """
+        Filter the available parts.
+        """
+
+        form = super().get_form()
+        item = self.get_object()
+
+        form.fields['part'].queryset = item.part.get_all_variants()
+
+        return form
+
+
 class StockLocationCreate(AjaxCreateView):
     """
     View for creating a new StockLocation
@@ -953,7 +1120,8 @@ class StockItemSerialize(AjaxUpdateView):
 
         initials['quantity'] = item.quantity
         initials['serial_numbers'] = item.part.getSerialNumberString(item.quantity)
-        initials['destination'] = item.location.pk
+        if item.location is not None:
+            initials['destination'] = item.location.pk
 
         return initials
 
@@ -1025,6 +1193,36 @@ class StockItemCreate(AjaxCreateView):
     ajax_template_name = 'modal_form.html'
     ajax_form_title = _('Create new Stock Item')
 
+    def get_part(self, form=None):
+        """
+        Attempt to get the "part" associted with this new stockitem.
+
+        - May be passed to the form as a query parameter (e.g. ?part=<id>)
+        - May be passed via the form field itself.
+        """
+
+        # Try to extract from the URL query
+        part_id = self.request.GET.get('part', None)
+
+        if part_id:
+            try:
+                part = Part.objects.get(pk=part_id)
+                return part
+            except (Part.DoesNotExist, ValueError):
+                pass
+
+        # Try to get from the form
+        if form:
+            try:
+                part_id = form['part'].value()
+                part = Part.objects.get(pk=part_id)
+                return part
+            except (Part.DoesNotExist, ValueError):
+                pass
+
+        # Could not extract a part object
+        return None
+
     def get_form(self):
         """ Get form for StockItem creation.
         Overrides the default get_form() method to intelligently limit
@@ -1033,53 +1231,49 @@ class StockItemCreate(AjaxCreateView):
 
         form = super().get_form()
 
-        part = None
+        part = self.get_part(form=form)
 
-        # If the user has selected a Part, limit choices for SupplierPart
-        if form['part'].value():
-            part_id = form['part'].value()
+        if part is not None:
+            sn = part.getNextSerialNumber()
+            form.field_placeholder['serial_numbers'] = _('Next available serial number is') + ' ' + str(sn)
 
-            try:
-                part = Part.objects.get(id=part_id)
-                
-                sn = part.getNextSerialNumber()
-                form.field_placeholder['serial_numbers'] = _('Next available serial number is') + ' ' + str(sn)
+            form.rebuild_layout()
 
-                form.rebuild_layout()
+            # Hide the 'part' field (as a valid part is selected)
+            # form.fields['part'].widget = HiddenInput()
 
-                # Hide the 'part' field (as a valid part is selected)
-                form.fields['part'].widget = HiddenInput()
+            # trackable parts get special consideration
+            if part.trackable:
+                form.fields['delete_on_deplete'].widget = HiddenInput()
+                form.fields['delete_on_deplete'].initial = False
+            else:
+                form.fields.pop('serial_numbers')
 
-                # trackable parts get special consideration
-                if part.trackable:
-                    form.fields['delete_on_deplete'].widget = HiddenInput()
-                    form.fields['delete_on_deplete'].initial = False
-                else:
-                    form.fields.pop('serial_numbers')
+            # If the part is NOT purchaseable, hide the supplier_part field
+            if not part.purchaseable:
+                form.fields['supplier_part'].widget = HiddenInput()
+            else:
+                # Pre-select the allowable SupplierPart options
+                parts = form.fields['supplier_part'].queryset
+                parts = parts.filter(part=part.id)
 
-                # If the part is NOT purchaseable, hide the supplier_part field
-                if not part.purchaseable:
-                    form.fields['supplier_part'].widget = HiddenInput()
-                else:
-                    # Pre-select the allowable SupplierPart options
-                    parts = form.fields['supplier_part'].queryset
-                    parts = parts.filter(part=part.id)
+                form.fields['supplier_part'].queryset = parts
 
-                    form.fields['supplier_part'].queryset = parts
+                # If there is one (and only one) supplier part available, pre-select it
+                all_parts = parts.all()
 
-                    # If there is one (and only one) supplier part available, pre-select it
-                    all_parts = parts.all()
+                if len(all_parts) == 1:
 
-                    if len(all_parts) == 1:
+                    # TODO - This does NOT work for some reason? Ref build.views.BuildItemCreate
+                    form.fields['supplier_part'].initial = all_parts[0].id
 
-                        # TODO - This does NOT work for some reason? Ref build.views.BuildItemCreate
-                        form.fields['supplier_part'].initial = all_parts[0].id
-
-            except Part.DoesNotExist:
-                pass
+        else:
+            # No Part has been selected!
+            # We must not provide *any* options for SupplierPart
+            form.fields['supplier_part'].queryset = SupplierPart.objects.none()
 
         # Otherwise if the user has selected a SupplierPart, we know what Part they meant!
-        elif form['supplier_part'].value() is not None:
+        if form['supplier_part'].value() is not None:
             pass
             
         return form
@@ -1095,34 +1289,27 @@ class StockItemCreate(AjaxCreateView):
             try:
                 original = StockItem.objects.get(pk=item_to_copy)
                 initials = model_to_dict(original)
-                self.ajax_form_title = _("Copy Stock Item")
+                self.ajax_form_title = _("Duplicate Stock Item")
             except StockItem.DoesNotExist:
                 initials = super(StockItemCreate, self).get_initial().copy()
 
         else:
             initials = super(StockItemCreate, self).get_initial().copy()
 
-        part_id = self.request.GET.get('part', None)
+        part = self.get_part()
+
         loc_id = self.request.GET.get('location', None)
         sup_part_id = self.request.GET.get('supplier_part', None)
 
-        part = None
         location = None
         supplier_part = None
 
-        # Part field has been specified
-        if part_id:
-            try:
-                part = Part.objects.get(pk=part_id)
-
-                # Check that the supplied part is 'valid'
-                if not part.is_template and part.active and not part.virtual:
-                    initials['part'] = part
-                    initials['location'] = part.get_default_location()
-                    initials['supplier_part'] = part.default_supplier
-
-            except (ValueError, Part.DoesNotExist):
-                pass
+        if part is not None:
+            # Check that the supplied part is 'valid'
+            if not part.is_template and part.active and not part.virtual:
+                initials['part'] = part
+                initials['location'] = part.get_default_location()
+                initials['supplier_part'] = part.default_supplier
 
         # SupplierPart field has been specified
         # It must match the Part, if that has been supplied
@@ -1177,8 +1364,8 @@ class StockItemCreate(AjaxCreateView):
                 valid = False
                 form.errors['quantity'] = [_('Invalid quantity')]
 
-            if quantity <= 0:
-                form.errors['quantity'] = [_('Quantity must be greater than zero')]
+            if quantity < 0:
+                form.errors['quantity'] = [_('Quantity cannot be less than zero')]
                 valid = False
 
             if part is None:

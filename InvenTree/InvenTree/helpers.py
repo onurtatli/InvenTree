@@ -396,13 +396,18 @@ def ExtractSerialNumbers(serials, expected_quantity):
 def validateFilterString(value):
     """
     Validate that a provided filter string looks like a list of comma-separated key=value pairs
+
     These should nominally match to a valid database filter based on the model being filtered.
+
     e.g. "category=6, IPN=12"
     e.g. "part__name=widget"
+
     The ReportTemplate class uses the filter string to work out which items a given report applies to.
     For example, an acceptance test report template might only apply to stock items with a given IPN,
     so the string could be set to:
+
     filters = "IPN = ACME0001"
+
     Returns a map of key:value pairs
     """
 

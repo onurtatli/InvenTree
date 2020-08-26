@@ -18,14 +18,18 @@ stock_location_detail_urls = [
 
 stock_item_detail_urls = [
     url(r'^edit/', views.StockItemEdit.as_view(), name='stock-item-edit'),
+    url(r'^convert/', views.StockItemConvert.as_view(), name='stock-item-convert'),
     url(r'^serialize/', views.StockItemSerialize.as_view(), name='stock-item-serialize'),
     url(r'^delete/', views.StockItemDelete.as_view(), name='stock-item-delete'),
     url(r'^qr_code/', views.StockItemQRCode.as_view(), name='stock-item-qr'),
     url(r'^delete_test_data/', views.StockItemDeleteTestData.as_view(), name='stock-item-delete-test-data'),
+    url(r'^assign/', views.StockItemAssignToCustomer.as_view(), name='stock-item-assign'),
+    url(r'^return/', views.StockItemReturnToStock.as_view(), name='stock-item-return'),
 
     url(r'^add_tracking/', views.StockItemTrackingCreate.as_view(), name='stock-tracking-create'),
 
     url(r'^test-report-select/', views.StockItemTestReportSelect.as_view(), name='stock-item-test-report-select'),
+    url(r'^label-select/', views.StockItemSelectLabels.as_view(), name='stock-item-label-select'),
 
     url(r'^test/', views.StockItemDetail.as_view(template_name='stock/item_tests.html'), name='stock-item-test-results'),
     url(r'^children/', views.StockItemDetail.as_view(template_name='stock/item_childs.html'), name='stock-item-children'),
@@ -56,7 +60,8 @@ stock_urls = [
     url(r'^item/new/?', views.StockItemCreate.as_view(), name='stock-item-create'),
 
     url(r'^item/test-report-download/', views.StockItemTestReportDownload.as_view(), name='stock-item-test-report-download'),
-    
+    url(r'^item/print-stock-labels/', views.StockItemPrintLabels.as_view(), name='stock-item-print-labels'),
+
     # URLs for StockItem attachments
     url(r'^item/attachment/', include([
         url(r'^new/', views.StockItemAttachmentCreate.as_view(), name='stock-item-attachment-create'),

@@ -1,4 +1,4 @@
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Build Status](https://travis-ci.org/inventree/InvenTree.svg?branch=master)](https://travis-ci.org/inventree/InvenTree) [![Documentation Status](https://readthedocs.org/projects/inventree/badge/?version=latest)](https://inventree.readthedocs.io/en/latest/?badge=latest) [![Coverage Status](https://coveralls.io/repos/github/inventree/InvenTree/badge.svg)](https://coveralls.io/github/inventree/InvenTree)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Build Status](https://travis-ci.org/inventree/InvenTree.svg?branch=master)](https://travis-ci.org/inventree/InvenTree) [![Coverage Status](https://coveralls.io/repos/github/inventree/InvenTree/badge.svg)](https://coveralls.io/github/inventree/InvenTree)
 
 <img src="images/logo/inventree.png" alt="InvenTree" width="128"/>
 
@@ -15,7 +15,7 @@ Refer to the [getting started guide](https://inventree.github.io/docs/start/inst
 
 ## Documentation
 
-For InvenTree documentation, refer to the [InvenTre documentation website](https://inventree.github.io).
+For InvenTree documentation, refer to the [InvenTree documentation website](https://inventree.github.io).
 
 ## Integration
 
@@ -39,35 +39,3 @@ Contributions are welcomed and encouraged. Please help to make this project even
 If you use InvenTree and find it to be useful, please consider making a donation toward its continued development. 
 
 [Donate via PayPal](https://paypal.me/inventree?locale.x=en_AU)
-
-inside WSL
-
-## Installing
-
-Each of these programs need to be installed (e.g. using apt or similar) before running the make install script:
-
-sudo apt-get install python3 python3-dev python3-pip g++ make libpango-1.0-0 libpangocairo-1.0-0
-
-## Virtual Environment
-
-apt-get install python3-venv
-python3 -m venv inventree-env
-source inventree-env/bin/activate
-
-
-## Installation
-
-sudo make install
-
-## Initialize Database
-
-sudo make migrate
-
-## Create Admin Account
-
-sudo make superuser
-
-## Run Development Server
-
-cd InvenTree
-python manage.py runserver 127.0.0.1:8000

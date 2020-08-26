@@ -128,7 +128,7 @@ INSTALLED_APPS = [
 
     # InvenTree apps
     'build.apps.BuildConfig',
-    'common.apps.CommonConfig',    
+    'common.apps.CommonConfig',
     'company.apps.CompanyConfig',
     'label.apps.LabelConfig',
     'order.apps.OrderConfig',
@@ -346,7 +346,7 @@ LOCALE_PATHS = (
 )
 
 
-TIME_ZONE = 'Europe/Istanbul'
+TIME_ZONE = 'UTC'
 
 USE_I18N = True
 
@@ -359,12 +359,15 @@ DATE_INPUT_FORMATS = [
 ]
 
 # LaTeX rendering settings (django-tex)
-latex_settings = CONFIG.get('latex', {})
+LATEX_SETTINGS = CONFIG.get('latex', {})
+
+# Is LaTeX rendering enabled? (Off by default)
+LATEX_ENABLED = LATEX_SETTINGS.get('enabled', False)
 
 # Set the latex interpreter in the config.yaml settings file
-LATEX_INTERPRETER = latex_settings.get('interpreter', 'pdflatex')
+LATEX_INTERPRETER = LATEX_SETTINGS.get('interpreter', 'pdflatex')
 
-LATEX_INTERPRETER_OPTIONS = latex_settings.get('options', '')
+LATEX_INTERPRETER_OPTIONS = LATEX_SETTINGS.get('options', '')
 
 LATEX_GRAPHICSPATH = [
     # Allow LaTeX files to access the report assets directory
@@ -382,3 +385,8 @@ DBBACKUP_STORAGE = 'django.core.files.storage.FileSystemStorage'
 DBBACKUP_STORAGE_OPTIONS = {
     'location': CONFIG.get('backup_dir', tempfile.gettempdir()),
 }
+
+# Internal IP addresses allowed to see the debug toolbar
+INTERNAL_IPS = [
+    '127.0.0.1',
+]

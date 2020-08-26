@@ -20,6 +20,7 @@ from .version import inventreeVersion, inventreeInstanceName
 
 from plugins import plugins as inventree_plugins
 
+
 print("Loading action plugins")
 action_plugins = inventree_plugins.load_action_plugins()
 
@@ -96,5 +97,3 @@ class ActionPluginView(APIView):
             'error': _("No matching action found"),
             "action": action,
         })
-
-
