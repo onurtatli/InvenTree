@@ -130,6 +130,7 @@ INSTALLED_APPS = [
     'build.apps.BuildConfig',
     'common.apps.CommonConfig',    
     'company.apps.CompanyConfig',
+    'label.apps.LabelConfig',
     'order.apps.OrderConfig',
     'part.apps.PartConfig',
     'report.apps.ReportConfig',
@@ -162,7 +163,7 @@ LOGGING = {
     },
 }
 
-MIDDLEWARE = [
+MIDDLEWARE = CONFIG.get('middleware', [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.locale.LocaleMiddleware',
@@ -172,11 +173,18 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'InvenTree.middleware.AuthRequiredMiddleware',
-]
+    'InvenTree.middleware.AuthRequiredMiddleware'
+])
 
-if CONFIG.get('log_queries', False):
-    MIDDLEWARE.append('InvenTree.middleware.QueryCountMiddleware')
+AUTHENTICATION_BACKENDS = CONFIG.get('authentication_backends', [
+    'django.contrib.auth.backends.ModelBackend'
+])
+
+# If the debug toolbar is enabled, add the modules
+if DEBUG and CONFIG.get('debug_toolbar', False):
+    print("Running with DEBUG_TOOLBAR enabled")
+    INSTALLED_APPS.append('debug_toolbar')
+    MIDDLEWARE.append('debug_toolbar.middleware.DebugToolbarMiddleware')
 
 ROOT_URLCONF = 'InvenTree.urls'
 

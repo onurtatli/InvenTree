@@ -39,3 +39,35 @@ Contributions are welcomed and encouraged. Please help to make this project even
 If you use InvenTree and find it to be useful, please consider making a donation toward its continued development. 
 
 [Donate via PayPal](https://paypal.me/inventree?locale.x=en_AU)
+
+inside WSL
+
+## Installing
+
+Each of these programs need to be installed (e.g. using apt or similar) before running the make install script:
+
+sudo apt-get install python3 python3-dev python3-pip g++ make libpango-1.0-0 libpangocairo-1.0-0
+
+## Virtual Environment
+
+apt-get install python3-venv
+python3 -m venv inventree-env
+source inventree-env/bin/activate
+
+
+## Installation
+
+sudo make install
+
+## Initialize Database
+
+sudo make migrate
+
+## Create Admin Account
+
+sudo make superuser
+
+## Run Development Server
+
+cd InvenTree
+python manage.py runserver 127.0.0.1:8000
