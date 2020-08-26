@@ -1,0 +1,229 @@
+{% extends "stock/stock_app_base.html" %}
+{% load static %}
+{% load i18n %}
+{% block content %}
+
+<div class='row'>
+<div class='col-sm-6'>
+    {% if location %}
+    <h3>{{ location.name }}</h3>
+    <p>{{ location.description }}</p>
+    {% else %}
+    <h3>{% trans "Stock" %}</h3>
+    <p>{% trans "All stock items" %}</p>
+    {% endif %}
+    <div class='btn-group action-buttons' role='group'>
+        <button class='btn btn-default' id='location-create' title='{% trans "Create new stock location" %}'>
+            <span class='fas fa-plus-circle icon-green'/>
+        </button>
+        <!-- Barcode actions menu -->
+        {% if location %}
+        <div class='dropdown dropdown-buttons'>
+            <button id='barcode-options' title='{% trans "Barcode actions" %}' class='btn btn-default dropdown-toggle' type='button' data-toggle='dropdown'><span class='fas fa-qrcode'></span> <span class='caret'></span></button>
+            <ul class='dropdown-menu' role='menu'>
+                <li><a href='#' id='show-qr-code'><span class='fas fa-qrcode'></span> {% trans "Show QR Code" %}</a></li>
+                <li class='disabled'><a href='#' id='print-label'><span class='fas fa-tag'></span> {% trans "Print Label" %}</a></li>
+                <li><a href='#' id='barcode-check-in'><span class='fas fa-arrow-right'></span> {% trans "Check-in Items" %}</a></li>
+            </ul>
+        </div>
+        <div class='dropdown dropdown-buttons'>
+            <button id='stock-actions' title='{% trans "Stock actions" %}' class='btn btn-default dropdown-toggle' type='button' data-toggle='dropdown'><span class='fas fa-boxes'></span> <span class='caret'></span></button>
+            <ul class='dropdown-menu' role='menu'>
+                <li><a href='#' id='location-count'><span class='fas fa-clipboard-list'></span>
+                 {% trans "Count stock" %}</a></li>
+            </ul>
+        </div>
+        <div class='dropdown dropdown-buttons'>
+            <button id='location-actions' title='{% trans "Location actions" %}' class='btn btn-default dropdown-toggle' type='button' data-toggle="dropdown"><span class='fas fa-sitemap'></span> <span class='caret'></span></button>
+            <ul class='dropdown-menu' role='menu'>
+                <li><a href='#' id='location-edit'><span class='fas fa-edit icon-green'></span> {% trans "Edit location" %}</a></li>
+                <li><a href='#' id='location-delete'><span class='fas fa-trash-alt icon-red'></span> {% trans "Delete location" %}</a></li>
+            </ul>
+        </div>
+        {% endif %}
+    </div>
+</div>
+<div class='col-sm-6'>
+    {% if location %}
+    <h3>{% trans "Location Details" %}</h3>
+    <table class='table table-striped table-condensed'>
+        <col width='25'>
+        <tr>
+            <td><span class='fas fa-sitemap'></span></td>
+            <td>{% trans "Location Path" %}</td>
+            <td>{{ location.pathstring }}</td>
+        </tr>
+        <tr>
+            <td><span class='fas fa-info-circle'></span></td>
+            <td>{% trans "Location Description" %}</td>
+            <td>{{ location.description }}</td>
+        </tr>
+        <tr>
+            <td><span class='fas fa-map-marker-alt'></span></td>
+            <td>{% trans "Sublocations" %}</td>
+            <td>{{ location.children.count }}</td>
+        </tr>
+        <tr>
+            <td><span class='fas fa-boxes'></span></td>
+            <td>{% trans "Stock Items" %}</td>
+            <td>{{ location.item_count }}</td>
+        </tr>
+    </table>
+    {% else %}
+    <h3>{% trans "Stock Details" %}</h3>
+    <table class='table table-striped table-condensed'>
+        <col width='25'>
+        <tr>
+            <td><span class='fas fa-map-marker-alt'></span></td>
+            <td>{% trans "Stock Locations" %}</td>
+            <td>{{ loc_count }}</td>
+        </tr>
+        <tr>
+            <td><span class='fas fa-boxes'></span></td>
+            <td>{% trans "Stock Items" %}</td>
+            <td>{{ stock_count }}</td>
+        </tr>
+    </table>
+    {% endif %}
+</div>
+</h3>
+</div>
+</div>
+
+{% if location and location.children.all|length > 0 %}
+{% include 'stock/location_list.html' with children=location.children.all collapse_id="locations" %}
+{% elif locations|length > 0 %}
+{% include 'stock/location_list.html' with children=locations collapse_id="locations" %}
+{% endif %}
+
+<hr>
+
+{% include "stock_table.html" %}
+
+{% endblock %}
+
+{% block js_load %}
+{{ block.super }}
+{% endblock %}
+{% block js_ready %}
+{{ block.super }}
+
+    if (inventreeLoadInt("show-part-locs") == 1) {
+        $("#collapse-item-locations").collapse('show');
+    }
+
+    $("#collapse-item-locations").on('shown.bs.collapse', function() {
+        inventreeSave('show-part-locs', 1);
+    });
+
+    $("#collapse-item-locations").on('hidden.bs.collapse', function() {
+        inventreeDel('show-part-locs');
+    });
+
+    {% if location %}
+    $("#barcode-check-in").click(function() {
+        barcodeCheckIn({{ location.id }});
+    });
+    {% endif %}
+
+    $("#stock-export").click(function() {
+        launchModalForm("{% url 'stock-export-options' %}", {
+            submit_text: "Export",
+            success: function(response) {
+                var url = "{% url 'stock-export' %}";
+                
+                url += "?format=" + response.format;
+                url += "&cascade=" + response.cascade;
+                
+                {% if location %}
+                url += "&location={{ location.id }}";
+                {% endif %}
+
+                location.href = url;
+            }
+        });
+    });
+
+    $('#location-create').click(function () {
+        launchModalForm("{% url 'stock-location-create' %}",
+                        {
+                            data: {
+                                {% if location %}
+                                location: {{ location.id }}
+                                {% endif %}
+                            },
+                            follow: true,
+                            secondary: [
+                                {
+                                    field: 'parent',
+                                    label: 'New Location',
+                                    title: 'Create new location',
+                                    url: "{% url 'stock-location-create' %}",
+                                },
+                            ]
+                        });
+        return false;
+    });
+
+    {% if location %}
+    $('#location-edit').click(function() {
+        launchModalForm("{% url 'stock-location-edit' location.id %}",
+                        {
+                            reload: true
+                        });
+        return false;
+    });
+
+    $('#location-delete').click(function() {
+        launchModalForm("{% url 'stock-location-delete' location.id %}",
+                         {
+                             redirect: "{% url 'stock-index' %}"
+                         });
+        return false;
+    });
+
+    {% if location %}
+    $("#location-count").click(function() {
+        launchModalForm("/stock/adjust/", {
+            data: {
+                action: "count",
+                location: {{ location.id }},
+                reload: true,
+            }
+        });
+    });
+    {% endif %}
+
+    $('#show-qr-code').click(function() {
+        launchModalForm("{% url 'stock-location-qr' location.id %}",
+        {
+            no_post: true,
+        });
+    });
+
+    {% endif %}
+
+    $('#item-create').click(function () {
+        createNewStockItem({
+            data: {
+                {% if location %}
+                location: {{ location.id }}
+                {% endif %}
+            }
+        });
+    });
+    
+    loadStockTable($("#stock-table"), {
+        buttons: [
+            '#stock-options',
+        ],
+        params: {
+            {% if location %}
+            location: {{ location.id }},
+            {% endif %}
+            part_detail: true,
+            location_detail: true,
+        },
+        url: "{% url 'api-stock-list' %}",
+    });
+{% endblock %}

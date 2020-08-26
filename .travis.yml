@@ -1,0 +1,28 @@
+dist: xenial
+
+language: python
+python:
+    - 3.6
+    - 3.7
+
+addons:
+    apt-packages:
+        - sqlite3
+
+before_install:
+    - sudo apt-get update
+    - sudo apt-get install gettext
+    - pip3 install invoke
+    - invoke install
+    - invoke migrate
+    - cd InvenTree && python3 manage.py createsuperuser --username InvenTreeAdmin --email admin@inventree.com --noinput && cd ..
+
+script:
+    - cd InvenTree && python3 manage.py makemigrations && cd ..
+    - python3 ci/check_migration_files.py
+    - invoke coverage
+    - invoke translate
+    - invoke style
+
+after_success:
+    - coveralls

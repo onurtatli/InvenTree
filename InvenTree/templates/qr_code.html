@@ -1,0 +1,12 @@
+{% load qr_code %}
+
+<div class='container' style='width: 80%;'>
+    {% if qr_data %}
+    <div class='qr-container'>
+        <img class='qr-code' src="{% qr_url_from_text qr_data size='m' image_format='png' error_correction='m' %}" alt="QR Code">
+    </div>
+    {% else %}
+    <b>Error:</b><br>
+    {{ error_msg }}
+    {% endif %}
+</div>

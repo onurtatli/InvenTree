@@ -1,0 +1,35 @@
+{% extends "company/company_base.html" %}
+{% load static %}
+{% load i18n %}}
+{% block details %}
+
+{% include 'company/tabs.html' with tab='details' %}
+
+<h4>{% trans "Company Details" %}</h4>
+<hr>
+
+<table class='table table-striped'>
+    <col width='25'>
+    <col>
+    <tr>
+        <td><span class='fas fa-industry'></span></td>
+        <td>{% trans "Manufacturer" %}</td>
+        <td>{% include "yesnolabel.html" with value=company.is_manufacturer %}</td>
+    </tr>
+    <tr>
+        <td><span class='fas fa-building'></span></td>
+        <td>{% trans "Supplier" %}</td>
+        <td>{% include 'yesnolabel.html' with value=company.is_supplier %}</td>
+    </tr>
+    <tr>
+        <td><span class='fas fa-user-tie'></span></td>
+        <td>{% trans "Customer" %}</td>
+        <td>{% include 'yesnolabel.html' with value=company.is_customer %}</td>
+    </tr>
+</table>
+
+{% endblock %}
+{% block js_ready %}
+{{ block.super }}
+   
+{% endblock %}

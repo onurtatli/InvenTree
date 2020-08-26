@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% load static %}
+{% load i18n %}
+
+{% block page_title %}
+InvenTree | {% trans "Supplier List" %} 
+{% endblock %}
+
+{% block content %}
+
+<h3>{{ title }}</h3>
+<hr>
+
+<div id='button-toolbar'>
+    <div class='btn-group'>
+        <button type='button' class="btn btn-success" id='new-company'>{{ button_text }}</button>
+    </div>
+</div>
+
+
+<table class='table table-striped' id='company-table' data-toolbar='#button-toolbar'>
+</table>
+
+{% endblock %}
+{% block js_ready %}
+{{ block.super }}
+    $('#new-company').click(function () {
+        launchModalForm("{{ create_url }}", {
+            follow: true
+        });
+    });
+
+    loadCompanyTable("#company-table", "{% url 'api-company-list' %}",
+        {
+            params: {
+                {% for key,value in filters.items %}{{ key }}: "{{ value }}",{% endfor %}
+            }
+        }
+    );
+
+{% endblock %}

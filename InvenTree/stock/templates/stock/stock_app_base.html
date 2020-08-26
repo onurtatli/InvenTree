@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% load static %}
+{% load i18n %}
+
+{% block page_title %}
+{% if location %}
+InvenTree | {% trans "Stock Location" %} - {{ location }}
+{% else %}
+InvenTree | Stock
+{% endif %}
+{% endblock %}
+
+{% block sidenav %}
+<div id='stock-tree'></div>
+{% endblock %}
+
+{% block pre_content %}
+{% if item %}
+{% include 'stock/loc_link.html' with location=item.location %}
+{% else %}
+{% include 'stock/loc_link.html' with location=location %}
+{% endif %}
+{% endblock %}
+
+{% block js_ready %}
+{{ block.super }}
+    loadTree("{% url 'api-stock-tree' %}",
+        "#stock-tree",
+        {
+            name: 'stock',
+        }
+    );
+
+    $("#toggle-stock-tree").click(function() {
+        toggleSideNav("#sidenav");
+        return false;
+    })
+
+    initSideNav();
+{% endblock %}

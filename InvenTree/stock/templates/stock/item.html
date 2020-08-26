@@ -1,0 +1,48 @@
+{% extends "stock/item_base.html" %}
+
+{% load static %}
+{% load inventree_extras %}
+{% load i18n %}
+
+{% block details %}
+
+{% include "stock/tabs.html" with tab="tracking" %}
+
+<h4>{% trans "Stock Tracking Information" %}</h4>
+<hr>
+
+<div id='table-toolbar'>
+    <div class='btn-group'>
+        <button class='btn btn-success' type='button' title='New tracking entry' id='new-entry'>New Entry</button>
+    </div>    
+</div>
+<table class='table table-condensed table-striped' id='track-table' data-toolbar='#table-toolbar'>
+</table>
+
+{% endblock %}
+
+{% block js_ready %}
+{{ block.super }}
+
+    $("#new-entry").click(function() {
+        launchModalForm(
+            "{% url 'stock-tracking-create' item.id %}",
+            {
+                reload: true,
+            }
+        );
+    }); 
+
+
+    loadStockTrackingTable($("#track-table"), {
+        params: function(p) {
+            return {
+                ordering: '-date',
+                item: {{ item.pk }},
+                user_detail: true,
+            };
+        },
+        url: "{% url 'api-stock-track' %}", 
+    });
+
+{% endblock %}

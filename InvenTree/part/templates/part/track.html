@@ -1,0 +1,12 @@
+{% extends "part/part_base.html" %}
+{% load static %}
+{% load i18n %}
+{% block details %}
+
+{% include 'part/tabs.html' with tab='track' %}
+
+<h4>{% trans "Part Tracking" %}</h4>
+
+<hr>
+
+{% endblock %}

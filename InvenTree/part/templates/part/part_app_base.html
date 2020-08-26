@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% load static %}
+{% load i18n %}
+
+{% block page_title %}
+{% if part %}
+InvenTree | {% trans "Part" %} - {{ part.full_name }}
+{% elif category %}
+InvenTree | {% trans "Part Category" %} - {{ category }}
+{% else %}
+InvenTree | {% trans "Part List" %}
+{% endif %}
+{% endblock %}
+
+{% block sidenav %}
+<div id='part-tree'></div>
+{% endblock %}
+
+{% block pre_content %}
+
+{% if part %}
+{% include "part/cat_link.html" with category=part.category %}
+{% else %}
+{% include 'part/cat_link.html' with category=category %}
+{% endif %}
+
+{% endblock %}
+
+{% block js_ready %}
+{{ block.super }}
+
+    loadTree("{% url 'api-part-tree' %}",
+        "#part-tree",
+        {
+            name: 'part',
+        }
+    );
+
+    $("#toggle-part-tree").click(function() {
+        toggleSideNav("#sidenav");
+        return false;
+    })
+
+    initSideNav();
+{% endblock %}

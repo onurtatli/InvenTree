@@ -1,0 +1,73 @@
+{% extends "part/part_base.html" %}
+{% load static %}
+{% load i18n %}
+{% block details %}
+
+{% include 'part/tabs.html' with tab='stock' %}
+
+<h4>{% trans "Part Stock" %}</h4>
+<hr>
+
+{% if part.is_template %}
+<div class='alert alert-info alert-block'>
+    Showing stock for all variants of <i>{{ part.full_name }}</i>
+</div>
+{% endif %}
+
+{% include "stock_table.html" %}
+
+{% endblock %}
+
+{% block js_load %}
+{{ block.super }}
+{% endblock %}
+{% block js_ready %}
+{{ block.super }}
+
+    $('#add-stock-item').click(function () {
+        createNewStockItem({
+            reload: true,
+            data: {
+                part: {{ part.id }},
+            }
+        });
+    });
+
+    loadStockTable($("#stock-table"), {
+        params: {
+            part: {{ part.id }},
+            location_detail: true,
+            part_detail: true,
+        },
+        groupByField: 'location',
+        buttons: [
+            '#stock-options',
+        ],
+        url: "{% url 'api-stock-list' %}",
+    });
+
+    $("#stock-export").click(function() {
+        launchModalForm("{% url 'stock-export-options' %}", {
+            submit_text: "{% trans 'Export' %}",
+            success: function(response) {
+                var url = "{% url 'stock-export' %}";
+
+                url += "?format=" + response.format;
+                url += "&cascade=" + response.cascade;
+                url += "&part={{ part.id }}";
+
+                location.href = url;
+            },
+        });
+    });
+
+    $('#item-create').click(function () {
+        createNewStockItem({
+            reload: true,
+            data: {
+                part: {{ part.id }},
+            }
+        });
+    });
+
+{% endblock %}
