@@ -9,10 +9,14 @@ from import_export.fields import Field
 import import_export.widgets as widgets
 
 from .models import PartCategory, Part
-from .models import PartAttachment, PartStar
+from .models import PartAttachment, PartStar, PartRelated
 from .models import BomItem
 from .models import PartParameterTemplate, PartParameter
+from .models import PartCategoryParameterTemplate
 from .models import PartTestTemplate
+from .models import PartSellPriceBreak
+
+from InvenTree.helpers import normalize
 
 from stock.models import StockLocation
 from company.models import SupplierPart
@@ -118,6 +122,11 @@ class PartCategoryAdmin(ImportExportModelAdmin):
     search_fields = ('name', 'description')
 
 
+class PartRelatedAdmin(admin.ModelAdmin):
+    ''' Class to manage PartRelated objects '''
+    pass
+
+
 class PartAttachmentAdmin(admin.ModelAdmin):
 
     list_display = ('part', 'attachment', 'comment')
@@ -163,6 +172,15 @@ class BomItemResource(ModelResource):
 
     # Is the sub-part itself an assembly?
     sub_assembly = Field(attribute='sub_part__assembly', readonly=True)
+
+    def dehydrate_quantity(self, item):
+        """
+        Special consideration for the 'quantity' field on data export.
+        We do not want a spreadsheet full of "1.0000" (we'd rather "1")
+
+        Ref: https://django-import-export.readthedocs.io/en/latest/getting_started.html#advanced-data-manipulation-on-export
+        """
+        return normalize(item.quantity)
 
     def before_export(self, queryset, *args, **kwargs):
 
@@ -257,11 +275,27 @@ class ParameterAdmin(ImportExportModelAdmin):
     list_display = ('part', 'template', 'data')
 
 
+class PartCategoryParameterAdmin(admin.ModelAdmin):
+
+    pass
+
+
+class PartSellPriceBreakAdmin(admin.ModelAdmin):
+
+    class Meta:
+        model = PartSellPriceBreak
+
+    list_display = ('part', 'quantity', 'price',)
+
+
 admin.site.register(Part, PartAdmin)
 admin.site.register(PartCategory, PartCategoryAdmin)
+admin.site.register(PartRelated, PartRelatedAdmin)
 admin.site.register(PartAttachment, PartAttachmentAdmin)
 admin.site.register(PartStar, PartStarAdmin)
 admin.site.register(BomItem, BomItemAdmin)
 admin.site.register(PartParameterTemplate, ParameterTemplateAdmin)
 admin.site.register(PartParameter, ParameterAdmin)
+admin.site.register(PartCategoryParameterTemplate, PartCategoryParameterAdmin)
 admin.site.register(PartTestTemplate, PartTestTemplateAdmin)
+admin.site.register(PartSellPriceBreak, PartSellPriceBreakAdmin)

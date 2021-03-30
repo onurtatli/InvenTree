@@ -6,6 +6,7 @@ from shutil import copyfile
 import random
 import string
 import os
+import sys
 
 def apps():
     """
@@ -22,7 +23,8 @@ def apps():
         'part',
         'report',
         'stock',
-        'InvenTree'
+        'InvenTree',
+        'users',
     ]
 
 def localDir():
@@ -47,7 +49,7 @@ def managePyPath():
 
     return os.path.join(managePyDir(), 'manage.py')
 
-def manage(c, cmd):
+def manage(c, cmd, pty=False):
     """
     Runs a given command against django's "manage.py" script.
 
@@ -59,7 +61,7 @@ def manage(c, cmd):
     c.run('cd {path} && python3 manage.py {cmd}'.format(
         path=managePyDir(),
         cmd=cmd
-    ))
+    ), pty=pty)
 
 @task(help={'length': 'Length of secret key (default=50)'})
 def key(c, length=50, force=False):
@@ -100,13 +102,31 @@ def install(c):
         print("Config file 'config.yaml' does not exist - copying from template.")
         copyfile(CONFIG_TEMPLATE_FILE, CONFIG_FILE)
 
+
+@task
+def shell(c):
+    """
+    Open a python shell with access to the InvenTree database models.
+    """
+
+    manage(c, 'shell', pty=True)
+
+
 @task
 def superuser(c):
     """
     Create a superuser (admin) account for the database.
     """
 
-    manage(c, 'createsuperuser')
+    manage(c, 'createsuperuser', pty=True)
+
+@task
+def check(c):
+    """
+    Check validity of django codebase
+    """
+
+    manage(c, "check")
 
 @task
 def migrate(c):
@@ -162,8 +182,13 @@ def translate(c):
     or after adding translations for existing strings.
     """
 
-    manage(c, "makemigrations")
+    # Translate applicable .py / .html / .js files
+    manage(c, "makemessages -e py -e html -e js")
     manage(c, "compilemessages")
+
+    path = os.path.join('InvenTree', 'script', 'translation_stats.py')
+
+    c.run(f'python {path}')
 
 @task
 def style(c):
@@ -175,18 +200,15 @@ def style(c):
     c.run('flake8 InvenTree')
 
 @task
-def test(c):
+def test(c, database=None):
     """
     Run unit-tests for InvenTree codebase.
     """
-
     # Run sanity check on the django install
     manage(c, 'check')
 
     # Run coverage tests
-    manage(c, 'test {apps}'.format(
-        apps=' '.join(apps())
-    ))
+    manage(c, 'test', pty=True)
 
 @task
 def coverage(c):
@@ -231,17 +253,117 @@ def postgresql(c):
     c.run('sudo apt-get install postgresql postgresql-contrib libpq-dev')
     c.run('pip3 install psycopg2')
 
+@task(help={'filename': "Output filename (default = 'data.json')"})
+def export_records(c, filename='data.json'):
+    """
+    Export all database records to a file
+    """
+
+    # Get an absolute path to the file
+    if not os.path.isabs(filename):
+        filename = os.path.join(localDir(), filename)
+        filename = os.path.abspath(filename) 
+
+    print(f"Exporting database records to file '{filename}'")
+
+    if os.path.exists(filename):
+        response = input("Warning: file already exists. Do you want to overwrite? [y/N]: ")
+        response = str(response).strip().lower()
+
+        if response not in ['y', 'yes']:
+            print("Cancelled export operation")
+            sys.exit(1)
+
+    cmd = f'dumpdata --exclude contenttypes --exclude auth.permission --indent 2 --output {filename}'
+
+    manage(c, cmd, pty=True)
+
+@task(help={'filename': 'Input filename'})
+def import_records(c, filename='data.json'):
+    """
+    Import database records from a file
+    """
+
+    # Get an absolute path to the supplied filename
+    if not os.path.isabs(filename):
+        filename = os.path.join(localDir(), filename)
+
+    if not os.path.exists(filename):
+        print(f"Error: File '{filename}' does not exist")
+        sys.exit(1)
+
+    print(f"Importing database records from '{filename}'")
+
+    cmd = f'loaddata {filename}'
+
+    manage(c, cmd, pty=True)
+
+@task
+def import_fixtures(c):
+    """
+    Import fixture data into the database.
+
+    This command imports all existing test fixture data into the database.
+
+    Warning:
+        - Intended for testing / development only!
+        - Running this command may overwrite existing database data!!
+        - Don't say you were not warned...
+    """
+
+    fixtures = [
+        # Build model
+        'build',
+        
+        # Common models
+        'settings',
+
+        # Company model
+        'company',
+        'price_breaks',
+        'supplier_part',
+
+        # Order model
+        'order',
+
+        # Part model
+        'bom',
+        'category',
+        'params',
+        'part',
+        'test_templates',
+
+        # Stock model
+        'location',
+        'stock_tests',
+        'stock',
+    ]
+
+    command = 'loaddata ' + ' '.join(fixtures)
+
+    manage(c, command, pty=True)
+
 @task
 def backup(c):
     """
     Create a backup of database models and uploaded media files.
 
     Backup files will be written to the 'backup_dir' file specified in 'config.yaml'
-
     """
 
     manage(c, 'dbbackup')
     manage(c, 'mediabackup')
+
+@task
+def restore(c):
+    """
+    Restores database models and media files.
+
+    Backup files are read from the 'backup_dir' file specified in 'config.yaml'
+    """
+
+    manage(c, 'dbrestore')
+    manage(c, 'mediarestore')
 
 @task(help={'address': 'Server address:port (default=127.0.0.1:8000)'})
 def server(c, address="127.0.0.1:8000"):
@@ -251,4 +373,4 @@ def server(c, address="127.0.0.1:8000"):
     Note: This is *not* sufficient for a production installation.
     """
 
-    manage(c, "runserver {address}".format(address=address))
+    manage(c, "runserver {address}".format(address=address), pty=True)

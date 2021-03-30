@@ -3,9 +3,15 @@
 {% load i18n %}
 {% load inventree_extras %}
 
+{% block menubar %}
+{% include "part/navbar.html" with tab="bom" %}
+{% endblock %}
+
+{% block heading %}
+{% trans "Upload Bill of Materials" %}
+{% endblock %}
+
 {% block details %}
-{% include "part/tabs.html" with tab="bom" %}
-<h4>{% trans "Upload Bill of Materials" %}</h4>
 
 <p>{% trans "Step 3 - Select Parts" %}</p>
 <hr>
@@ -49,21 +55,21 @@
             {% for row in bom_rows %}
             <tr {% if row.errors %} style='background: #ffeaea;'{% endif %} part-name='{{ row.part_name }}' part-description='{{ row.description }}' part-select='#select_part_{{ row.index }}'>
                 <td>
-                    <button class='btn btn-default btn-remove' onClick='removeRowFromBomWizard()' id='del_row_{{ forloop.counter }}' style='display: inline; float: right;' title='Remove row'>
+                    <button class='btn btn-default btn-remove' onClick='removeRowFromBomWizard()' id='del_row_{{ forloop.counter }}' style='display: inline; float: right;' title='{% trans "Remove row" %}'>
                             <span row_id='{{ forloop.counter }}' class='fas fa-trash-alt icon-red'></span>
                     </button>
                 </td>
                 <td></td>
                 <td>{% add row.index 1 %}</td>
                 <td>
-                    <button class='btn btn-default btn-create'  onClick='newPartFromBomWizard()' id='new_part_row_{{ row.index }}' title='Create new part' type='button'>
+                    <button class='btn btn-default btn-create'  onClick='newPartFromBomWizard()' id='new_part_row_{{ row.index }}' title='{% trans "Create new part" %}' type='button'>
                         <span row_id='{{ row.index }}' class='fas fa-plus icon-green'/>
                     </button>
                     <select class='select bomselect' id='select_part_{{ row.index }}' name='part_{{ row.index }}'>
                         <option value=''>--- {% trans "Select Part" %} ---</option>
                         {% for part in row.part_options %}
                         <option value='{{ part.id }}' {% if part.id == row.part.id %} selected='selected' {% elif part.id == row.part_match.id %} selected='selected' {% endif %}>
-                            {{ part }} - {{ part.available_stock }}
+                            {{ part }}
                         </option>
                         {% endfor %}
                     </select>

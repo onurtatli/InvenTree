@@ -1,10 +1,16 @@
-from rest_framework.test import APITestCase
 from rest_framework import status
+
 from django.urls import reverse
-from django.contrib.auth import get_user_model
+
+from part.models import Part
+from stock.models import StockItem
+from company.models import Company
+
+from InvenTree.api_tester import InvenTreeAPITestCase
+from InvenTree.status_codes import StockStatus
 
 
-class PartAPITest(APITestCase):
+class PartAPITest(InvenTreeAPITestCase):
     """
     Series of tests for the Part DRF API
     - Tests for Part API
@@ -19,12 +25,16 @@ class PartAPITest(APITestCase):
         'test_templates',
     ]
 
-    def setUp(self):
-        # Create a user for auth
-        User = get_user_model()
-        User.objects.create_user('testuser', 'test@testing.com', 'password')
+    roles = [
+        'part.change',
+        'part.add',
+        'part.delete',
+        'part_category.change',
+        'part_category.add',
+    ]
 
-        self.client.login(username='testuser', password='password')
+    def setUp(self):
+        super().setUp()
 
     def test_get_categories(self):
         """ Test that we can retrieve list of part categories """
@@ -213,3 +223,105 @@ class PartAPITest(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_get_thumbs(self):
+        """
+        Return list of part thumbnails
+        """
+
+        url = reverse('api-part-thumbs')
+
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_paginate(self):
+        """
+        Test pagination of the Part list API
+        """
+
+        for n in [1, 5, 10]:
+            response = self.get(reverse('api-part-list'), {'limit': n})
+
+            data = response.data
+
+            self.assertIn('count', data)
+            self.assertIn('results', data)
+            
+            self.assertEqual(len(data['results']), n)
+
+
+class PartAPIAggregationTest(InvenTreeAPITestCase):
+    """
+    Tests to ensure that the various aggregation annotations are working correctly...
+    """
+
+    fixtures = [
+        'category',
+        'company',
+        'part',
+        'location',
+        'bom',
+        'test_templates',
+    ]
+
+    roles = [
+        'part.view',
+        'part.change',
+    ]
+
+    def setUp(self):
+
+        super().setUp()
+
+        # Add a new part
+        self.part = Part.objects.create(
+            name='Banana',
+        )
+
+        # Create some stock items associated with the part
+
+        # First create 600 units which are OK
+        StockItem.objects.create(part=self.part, quantity=100)
+        StockItem.objects.create(part=self.part, quantity=200)
+        StockItem.objects.create(part=self.part, quantity=300)
+
+        # Now create another 400 units which are LOST
+        StockItem.objects.create(part=self.part, quantity=400, status=StockStatus.LOST)
+
+    def get_part_data(self):
+        url = reverse('api-part-list')
+
+        response = self.client.get(url, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        for part in response.data:
+            if part['pk'] == self.part.pk:
+                return part
+
+        # We should never get here!
+        self.assertTrue(False)
+
+    def test_stock_quantity(self):
+        """
+        Simple test for the stock quantity
+        """
+
+        data = self.get_part_data()
+
+        self.assertEqual(data['in_stock'], 600)
+        self.assertEqual(data['stock_item_count'], 4)
+    
+        # Add some more stock items!!
+        for i in range(100):
+            StockItem.objects.create(part=self.part, quantity=5)
+
+        # Add another stock item which is assigned to a customer (and shouldn't count)
+        customer = Company.objects.get(pk=4)
+        StockItem.objects.create(part=self.part, quantity=9999, customer=customer)
+
+        data = self.get_part_data()
+
+        self.assertEqual(data['in_stock'], 1100)
+        self.assertEqual(data['stock_item_count'], 105)

@@ -5,13 +5,16 @@ from __future__ import unicode_literals
 
 from .validators import allowable_url_schemes
 
+from django.utils.translation import ugettext as _
+
 from django.forms.fields import URLField as FormURLField
 from django.db import models as models
 from django.core import validators
 from django import forms
+
 from decimal import Decimal
 
-from InvenTree.helpers import normalize
+import InvenTree.helpers
 
 
 class InvenTreeURLFormField(FormURLField):
@@ -29,6 +32,32 @@ class InvenTreeURLField(models.URLField):
         return super().formfield(**{
             'form_class': InvenTreeURLFormField
         })
+
+
+class DatePickerFormField(forms.DateField):
+    """
+    Custom date-picker field
+    """
+
+    def __init__(self, **kwargs):
+
+        help_text = kwargs.get('help_text', _('Enter date'))
+        required = kwargs.get('required', False)
+        initial = kwargs.get('initial', None)
+
+        widget = forms.DateInput(
+            attrs={
+                'type': 'date',
+            }
+        )
+
+        forms.DateField.__init__(
+            self,
+            required=required,
+            initial=initial,
+            help_text=help_text,
+            widget=widget
+        )
 
 
 def round_decimal(value, places):
@@ -55,7 +84,7 @@ class RoundingDecimalFormField(forms.DecimalField):
         """
 
         if type(value) == Decimal:
-            return normalize(value)
+            return InvenTree.helpers.normalize(value)
         else:
             return value
 

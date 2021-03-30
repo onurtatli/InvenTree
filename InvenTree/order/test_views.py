@@ -6,10 +6,12 @@ from __future__ import unicode_literals
 from django.test import TestCase
 from django.urls import reverse
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 
 from InvenTree.status_codes import PurchaseOrderStatus
 
 from .models import PurchaseOrder, PurchaseOrderLineItem
+from .models import SalesOrder
 
 import json
 
@@ -31,8 +33,21 @@ class OrderViewTestCase(TestCase):
         super().setUp()
 
         # Create a user
-        User = get_user_model()
-        User.objects.create_user('username', 'user@email.com', 'password')
+        user = get_user_model().objects.create_user('username', 'user@email.com', 'password')
+
+        # Ensure that the user has the correct permissions!
+        g = Group.objects.create(name='orders')
+        user.groups.add(g)
+
+        for rule in g.rule_sets.all():
+            if rule.name in ['purchase_order', 'sales_order']:
+                rule.can_change = True
+                rule.can_add = True
+                rule.can_delete = True
+
+                rule.save()
+
+        g.save()
 
         self.client.login(username='username', password='password')
 
@@ -43,6 +58,88 @@ class OrderListTest(OrderViewTestCase):
         response = self.client.get(reverse('po-index'))
 
         self.assertEqual(response.status_code, 200)
+
+
+class SalesOrderCreate(OrderViewTestCase):
+    """
+    Create a SalesOrder using the form view
+    """
+
+    URL = reverse('so-create')
+
+    def test_create_view(self):
+        """
+        Retrieve the view for creating a sales order'
+        """
+
+        response = self.client.get(self.URL, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+
+        self.assertEqual(response.status_code, 200)
+
+    def post(self, data, **kwargs):
+
+        return self.client.post(self.URL, data, HTTP_X_REQUESTED_WITH='XMLHttpRequest', **kwargs)
+
+    def test_post_error(self):
+        """
+        POST with errors
+        """
+
+        n = SalesOrder.objects.count()
+
+        data = {
+            'reference': '12345678',
+        }
+
+        response = self.post(data)
+
+        data = json.loads(response.content)
+
+        self.assertIn('form_valid', data.keys())
+
+        # Customer is not specified - should return False
+        self.assertFalse(data['form_valid'])
+
+        errors = json.loads(data['form_errors'])
+
+        self.assertIn('customer', errors.keys())
+        self.assertIn('description', errors.keys())
+
+        # No new SalesOrder objects should have been created
+        self.assertEqual(SalesOrder.objects.count(), n)
+
+    def test_post_valid(self):
+        """
+        POST a valid SalesOrder
+        """
+
+        n = SalesOrder.objects.count()
+
+        data = {
+            'reference': '12345678',
+            'customer': 4,
+            'description': 'A description',
+        }
+
+        response = self.post(data)
+
+        json_data = json.loads(response.content)
+
+        self.assertTrue(json_data['form_valid'])
+
+        # Create another SalesOrder, this time with a target date
+        data = {
+            'reference': '12345679',
+            'customer': 4,
+            'description': 'Another order, this one with a target date!',
+            'target_date': '2020-12-25',
+        }
+
+        response = self.post(data)
+
+        json_data = json.loads(response.content)
+
+        self.assertEqual(SalesOrder.objects.count(), n + 2)
 
 
 class POTests(OrderViewTestCase):
@@ -98,6 +195,7 @@ class POTests(OrderViewTestCase):
         self.assertEqual(response.status_code, 200)
         
         data = json.loads(response.content)
+
         self.assertFalse(data['form_valid'])
 
         # Test WITH confirmation
@@ -136,7 +234,6 @@ class POTests(OrderViewTestCase):
         response = self.client.post(url, post_data, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
         data = json.loads(response.content)
         self.assertFalse(data['form_valid'])
-        self.assertIn('Invalid Purchase Order', str(data['html_form']))
 
         # POST with a part that does not match the purchase order
         post_data['order'] = 1
@@ -144,14 +241,12 @@ class POTests(OrderViewTestCase):
         response = self.client.post(url, post_data, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
         data = json.loads(response.content)
         self.assertFalse(data['form_valid'])
-        self.assertIn('must match for Part and Order', str(data['html_form']))
 
         # POST with an invalid part
         post_data['part'] = 12345
         response = self.client.post(url, post_data, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
         data = json.loads(response.content)
         self.assertFalse(data['form_valid'])
-        self.assertIn('Invalid SupplierPart selection', str(data['html_form']))
 
         # POST the form with valid data
         post_data['part'] = 100

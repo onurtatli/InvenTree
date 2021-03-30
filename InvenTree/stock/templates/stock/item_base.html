@@ -15,6 +15,31 @@ InvenTree | {% trans "Stock Item" %} - {{ item }}
 {% block pre_content %}
 {% include 'stock/loc_link.html' with location=item.location %}
 
+{% setting_object 'STOCK_OWNERSHIP_CONTROL' as owner_control %}
+{% if owner_control.value == "True" %}
+    {% authorized_owners item.owner as owners %}
+
+    {% if not user in owners and not user.is_superuser %}
+    <div class='alert alert-block alert-info'>
+        {% trans "You are not in the list of owners of this item. This stock item cannot be edited." %}<br>
+    </div>
+    {% endif %}
+{% endif %}
+
+{% if item.is_building %}
+<div class='alert alert-block alert-info'>
+    {% trans "This stock item is in production and cannot be edited." %}<br>
+    {% trans "Edit the stock item from the build view." %}<br>
+
+    {% if item.build %}
+    <a href="{% url 'build-detail' item.build.id %}">
+        <b>{{ item.build }}</b>
+    </a>
+    {% endif %}
+
+</div>
+{% endif %}
+
 {% if item.hasRequiredTests and not item.passedAllRequiredTests %}
 <div class='alert alert-block alert-danger'>
     {% trans "This stock item has not passed all required tests" %}
@@ -23,13 +48,13 @@ InvenTree | {% trans "Stock Item" %} - {{ item }}
 
 {% for allocation in item.sales_order_allocations.all %}
 <div class='alert alert-block alert-info'>
-    {% trans "This stock item is allocated to Sales Order" %} <a href="{% url 'so-detail' allocation.line.order.id %}"><b>#{{ allocation.line.order.reference }}</b></a> ({% trans "Quantity" %}: {% decimal allocation.quantity %})
+    {% trans "This stock item is allocated to Sales Order" %} <a href="{% url 'so-detail' allocation.line.order.id %}"><b>#{{ allocation.line.order }}</b></a> ({% trans "Quantity" %}: {% decimal allocation.quantity %})
 </div>
 {% endfor %}
 
 {% for allocation in item.allocations.all %}
 <div class='alert alert-block alert-info'>
-    {% trans "This stock item is allocated to Build" %} <a href="{% url 'build-detail' allocation.build.id %}"><b>#{{ allocation.build.id }}</b></a> ({% trans "Quantity" %}: {% decimal allocation.quantity %})
+    {% trans "This stock item is allocated to Build" %} <a href="{% url 'build-detail' allocation.build.id %}"><b>#{{ allocation.build }}</b></a> ({% trans "Quantity" %}: {% decimal allocation.quantity %})
 </div>
 {% endfor %}
 
@@ -54,79 +79,134 @@ InvenTree | {% trans "Stock Item" %} - {{ item }}
 {% endblock %}
 
 {% block page_data %}
+
+{% setting_object 'STOCK_OWNERSHIP_CONTROL' as owner_control %}
+{% if owner_control.value == "True" %}
+    {% authorized_owners item.owner as owners %}
+{% endif %}
+
 <h3>
     {% trans "Stock Item" %}
+    {% if item.is_expired %}
+    <span class='label label-large label-large-red'>{% trans "Expired" %}</span>
+    {% else %}
     {% stock_status_label item.status large=True %}
+    {% if item.is_stale %}
+    <span class='label label-large label-large-yellow'>{% trans "Stale" %}</span>
+    {% endif %}
+    {% endif %}
 </h3>
 <hr>
 <h4>
+{% if roles.part.view %}
+<a href='{% url "part-detail" item.part.pk %}'>
+{% endif %}
+{{ item.part.full_name}}
+{% if roles.part.view %}
+</a>
+{% endif %}
 {% if item.serialized %}
-{{ item.part.full_name}} # {{ item.serial }}
+ # {{ item.serial }}
 {% else %}
-{% decimal item.quantity %} &times {{ item.part.full_name }}
+ &times {% decimal item.quantity %}
+{% endif %}
+{% if user.is_staff and roles.stock.change %}
+    <a  href="{% url 'admin:stock_stockitem_change' item.pk %}"><span title="{% trans 'Admin view' %}" class='fas fa-user-shield'></span></a>
 {% endif %}
 </h4>
 
 <div class='btn-group' role='group'>
 
-
 </div>
 
 <div class='btn-group action-buttons' role='group'>
+    
+    {% if barcodes %}
     <!-- Barcode actions menu -->
-    <div class='dropdown dropdown-buttons'>
+    <div class='btn-group'>
         <button id='barcode-options' title='{% trans "Barcode actions" %}' class='btn btn-default dropdown-toggle' type='button' data-toggle='dropdown'><span class='fas fa-qrcode'></span> <span class='caret'></span></button>
         <ul class='dropdown-menu' role='menu'>
             <li><a href='#' id='show-qr-code'><span class='fas fa-qrcode'></span> {% trans "Show QR Code" %}</a></li>
-            <li><a href='#' id='print-label'><span class='fas fa-tag'></span> {% trans "Print Label" %}</a></li>
+            {% if roles.stock.change %}
             {% if item.uid %}
-            <li><a href='#' id='unlink-barcode'><span class='fas fa-unlink'></span> {% trans "Unlink Barcode" %}</a></li>
+            <li><a href='#' id='barcode-unlink'><span class='fas fa-unlink'></span> {% trans "Unlink Barcode" %}</a></li>
             {% else %}
-            <li><a href='#' id='link-barcode'><span class='fas fa-link'></span> {% trans "Link Barcode" %}</a></li>
+            <li><a href='#' id='barcode-link'><span class='fas fa-link'></span> {% trans "Link Barcode" %}</a></li>
+            {% endif %}
+            <li><a href='#' id='barcode-scan-into-location'><span class='fas fa-sitemap'></span> {% trans "Scan to Location" %}</a></li>
+            {% endif %}
+        </ul>
+    </div>
+    {% endif %}
+    <!-- Document / label menu -->
+    <div class='btn-group'>
+        <button id='document-options' title='{% trans "Printing actions" %}' class='btn btn-default dropdown-toggle' type='button' data-toggle='dropdown'><span class='fas fa-print'></span> <span class='caret'></span></button>
+        <ul class='dropdown-menu' role='menu'>
+            <li><a href='#' id='print-label'><span class='fas fa-tag'></span> {% trans "Print Label" %}</a></li>
+            {% if test_report_enabled %}
+            <li><a href='#' id='stock-test-report'><span class='fas fa-file-pdf'></span> {% trans "Test Report" %}</a></li>
             {% endif %}
         </ul>
     </div>
     <!-- Stock adjustment menu -->
-    <div class='dropdown dropdown-buttons'>
-        <button id='stock-options' title='{% trans "Stock adjustment actions" %}' class='btn btn-default dropdown-toggle' type='button' data-toggle='dropdown'><span class='fas fa-boxes'></span> <span class='caret'></span></button>
-        <ul class='dropdown-menu' role='menu'>
-            {% if item.in_stock %}
-            {% if not item.serialized %}
-            <li><a href='#' id='stock-count' title='{% trans "Count stock" %}'><span class='fas fa-clipboard-list'></span> {% trans "Count stock" %}</a></li>
-            <li><a href='#' id='stock-add' title='{% trans "Add stock" %}'><span class='fas fa-plus-circle icon-green'></span> {% trans "Add stock" %}</a></li>
-            <li><a href='#' id='stock-remove' title='{% trans "Remove stock" %}'><span class='fas fa-minus-circle icon-red'></span> {% trans "Remove stock" %}</a></li>
-            {% endif %}
-            <li><a href='#' id='stock-move' title='{% trans "Transfer stock" %}'><span class='fas fa-exchange-alt icon-blue'></span> {% trans "Transfer stock" %}</a></li>
-            {% if item.part.trackable and not item.serialized %}
-            <li><a href='#' id='stock-serialize' title='{% trans "Serialize stock" %}'><span class='fas fa-hashtag'></span> {% trans "Serialize stock" %}</a> </li>
-            {% endif %}
-            {% endif %}
-            {% if item.part.salable and not item.customer %}
-            <li><a href='#' id='stock-assign-to-customer' title='{% trans "Assign to customer" %}'><span class='fas fa-user-tie'></span> {% trans "Assign to customer" %}</a></li>
-            {% endif %}
-            {% if item.customer %}
-            <li><a href='#' id='stock-return-from-customer' title='{% trans "Return to stock" %}'><span class='fas fa-undo'></span> {% trans "Return to stock" %}</a></li>
-            {% endif %}
-        </ul>
-    </div>
-    <!-- Edit stock item -->
-    <div class='dropdown dropdown-buttons'>
-        <button id='stock-edit-actions' title='{% trans "Stock actions" %}' class='btn btn-default dropdown-toggle' type='button' data-toggle='dropdown'><span class='fas fa-tools'></span> <span class='caret'></span></button>
-        <ul class='dropdown-menu' role='menu'>
-
-            {% if item.part.has_variants %}
-            <li><a href='#' id='stock-convert' title='{% trans "Convert to variant" %}'><span class='fas fa-screwdriver'></span> {% trans "Convert to variant" %}</a></li>
-            {% endif %}
-            <li><a href='#' id='stock-duplicate' title='{% trans "Duplicate stock item" %}'><span class='fas fa-copy'></span> {% trans "Duplicate stock item" %}</a></li>
-            <li><a href='#' id='stock-edit' title='{% trans "Edit stock item" %}'><span class='fas fa-edit icon-blue'></span> {% trans "Edit stock item" %}</a></li>
-            {% if item.can_delete or user.is_staff %}
-            <li><a href='#' id='stock-delete' title='{% trans "Delete stock item" %}'><span class='fas fa-trash-alt icon-red'></span> {% trans "Delete stock item" %}</a></li>
-            {% endif %}
-        </ul>
-    </div>
-    <button type='button' class='btn btn-default' id='stock-test-report' title='{% trans "Generate test report" %}'>
-        <span class='fas fa-file-invoice'/>
-    </button>
+    <!-- Check permissions and owner -->
+    {% if owner_control.value == "False" or owner_control.value == "True" and user in owners or user.is_superuser %}
+        {% if roles.stock.change and not item.is_building %}
+        <div class='btn-group'>
+            <button id='stock-actions' title='{% trans "Stock adjustment actions" %}' class='btn btn-default dropdown-toggle' type='button' data-toggle='dropdown'><span class='fas fa-boxes'></span> <span class='caret'></span></button>
+            <ul class='dropdown-menu' role='menu'>
+                {% if not item.serialized %}
+                {% if item.in_stock %}
+                <li><a href='#' id='stock-count' title='{% trans "Count stock" %}'><span class='fas fa-clipboard-list'></span> {% trans "Count stock" %}</a></li>
+                {% endif %}
+                {% if not item.customer %}
+                <li><a href='#' id='stock-add' title='{% trans "Add stock" %}'><span class='fas fa-plus-circle icon-green'></span> {% trans "Add stock" %}</a></li>
+                {% endif %}
+                {% if item.in_stock %}
+                <li><a href='#' id='stock-remove' title='{% trans "Remove stock" %}'><span class='fas fa-minus-circle icon-red'></span> {% trans "Remove stock" %}</a></li>
+                {% endif %}
+                {% if item.in_stock and item.can_adjust_location %}
+                <li><a href='#' id='stock-move' title='{% trans "Transfer stock" %}'><span class='fas fa-exchange-alt icon-blue'></span> {% trans "Transfer stock" %}</a></li>
+                {% endif %}
+                {% if item.in_stock and item.part.trackable %}
+                <li><a href='#' id='stock-serialize' title='{% trans "Serialize stock" %}'><span class='fas fa-hashtag'></span> {% trans "Serialize stock" %}</a> </li>
+                {% endif %}
+                {% endif %}
+                {% if item.in_stock and item.can_adjust_location and item.part.salable and not item.customer %}
+                <li><a href='#' id='stock-assign-to-customer' title='{% trans "Assign to customer" %}'><span class='fas fa-user-tie'></span> {% trans "Assign to customer" %}</a></li>
+                {% endif %}
+                {% if item.customer %}
+                <li><a href='#' id='stock-return-from-customer' title='{% trans "Return to stock" %}'><span class='fas fa-undo'></span> {% trans "Return to stock" %}</a></li>
+                {% endif %}
+                {% if item.belongs_to %}
+                <li>
+                    <a href='#' id='stock-uninstall' title='{% trans "Uninstall stock item" %}'><span class='fas fa-unlink'></span> {% trans "Uninstall" %}</a>
+                </li>
+                {% endif %}
+            </ul>
+        </div>
+        {% endif %}
+        <!-- Edit stock item -->
+        {% if roles.stock.change and not item.is_building %}
+        <div class='btn-group'>
+            <button id='stock-edit-actions' title='{% trans "Stock actions" %}' class='btn btn-default dropdown-toggle' type='button' data-toggle='dropdown'><span class='fas fa-tools'></span> <span class='caret'></span></button>
+            <ul class='dropdown-menu' role='menu'>
+                {% if item.part.has_variants %}
+                <li><a href='#' id='stock-convert' title='{% trans "Convert to variant" %}'><span class='fas fa-screwdriver'></span> {% trans "Convert to variant" %}</a></li>
+                {% endif %}
+                {% if roles.stock.add %}
+                <li><a href='#' id='stock-duplicate' title='{% trans "Duplicate stock item" %}'><span class='fas fa-copy'></span> {% trans "Duplicate stock item" %}</a></li>
+                {% endif %}
+                <li><a href='#' id='stock-edit' title='{% trans "Edit stock item" %}'><span class='fas fa-edit icon-blue'></span> {% trans "Edit stock item" %}</a></li>
+                {% if user.is_staff or roles.stock.delete %}
+                    {% if item.can_delete %}
+                    <li><a href='#' id='stock-delete' title='{% trans "Delete stock item" %}'><span class='fas fa-trash-alt icon-red'></span> {% trans "Delete stock item" %}</a></li>
+                    {% endif %}
+                {% endif %}
+            </ul>
+        </div>
+        {% endif %}
+    {% endif %}
 </div>
 
 {% endblock %}
@@ -139,7 +219,13 @@ InvenTree | {% trans "Stock Item" %} - {{ item }}
         <td><span class='fas fa-shapes'></span></td>
         <td>{% trans "Base Part" %}</td>
         <td>
-            <a href="{% url 'part-stock' item.part.id %}">{{ item.part.full_name }}
+            {% if roles.part.view %}
+            <a href="{% url 'part-stock' item.part.id %}">
+            {% endif %}
+            {{ item.part.full_name }}
+            {% if roles.part.view %}
+            </a>
+            {% endif %}
         </td>
     </tr>
     {% if item.serialized %}
@@ -165,20 +251,18 @@ InvenTree | {% trans "Stock Item" %} - {{ item }}
     {% if item.belongs_to %}
     <tr>
         <td><span class='fas fa-box'></span></td>
-        <td>{% trans "Belongs To" %}</td>
-        <td><a href="{% url 'stock-item-detail' item.belongs_to.id %}">{{ item.belongs_to }}</a></td>
+        <td>
+            {% trans "Installed In" %}
+        </td>
+        <td>
+            <a href="{% url 'stock-item-detail' item.belongs_to.id %}">{{ item.belongs_to }}</a>
+        </td>
     </tr>
     {% elif item.sales_order %}
     <tr>
         <td><span class='fas fa-user-tie'></span></td>
         <td>{% trans "Sales Order" %}</td>
         <td><a href="{% url 'so-detail' item.sales_order.id %}">{{ item.sales_order.reference }}</a> - <a href="{% url 'company-detail' item.sales_order.customer.id %}">{{ item.sales_order.customer.name }}</a></td>
-    </tr>
-    {% elif item.build_order %}
-    <tr>
-        <td><span class='fas fa-tools'></span></td>
-        <td>{% trans "Build Order" %}</td>
-        <td><a href="{% url 'build-detail' item.build_order.id %}">{{ item.build_order }}</a></td>
     </tr>
     {% else %}
     <tr>
@@ -187,22 +271,29 @@ InvenTree | {% trans "Stock Item" %} - {{ item }}
         {% if item.location %}
         <td><a href="{% url 'stock-location-detail' item.location.id %}">{{ item.location.name }}</a></td>
         {% else %}
-        <td>{% trans "No location set" %}</td>
+        <td><i>{% trans "No location set" %}</i></td>
         {% endif %}
     </tr>
     {% endif %}
     {% if item.uid %}
     <tr>
         <td><span class='fas fa-barcode'></span></td>
-        <td>{% trans "Unique Identifier" %}</td>
+        <td>{% trans "Barcode Identifier" %}</td>
         <td>{{ item.uid }}</td>
     </tr>
     {% endif %}
     {% if item.batch %}
     <tr>
-        <td></td>
+        <td><span class='fas fa-layer-group'></span></td>
         <td>{% trans "Batch" %}</td>
         <td>{{ item.batch }}</td>
+    </tr>
+    {% endif %}
+    {% if item.packaging %}
+    <tr>
+        <td><span class='fas fa-cube'></span></td>
+        <td>{% trans "Packaging" %}</td>
+        <td>{{ item.packaging }}</td>
     </tr>
     {% endif %}
     {% if item.build %}
@@ -214,9 +305,16 @@ InvenTree | {% trans "Stock Item" %} - {{ item }}
     {% endif %}
     {% if item.purchase_order %}
     <tr>
-        <td></td>
+        <td><span class='fas fa-shopping-cart'></span></td>
         <td>{% trans "Purchase Order" %}</td>
         <td><a href="{% url 'po-detail' item.purchase_order.id %}">{{ item.purchase_order }}</a></td>
+    </tr>
+    {% endif %}
+    {% if item.purchase_price %}
+    <tr>
+        <td><span class='fas fa-dollar-sign'></span></td>
+        <td>{% trans "Purchase Price" %}</td>
+        <td>{{ item.purchase_price }}</td>
     </tr>
     {% endif %}
     {% if item.parent %}
@@ -245,6 +343,20 @@ InvenTree | {% trans "Stock Item" %} - {{ item }}
         <td><a href="{% url 'supplier-part-detail' item.supplier_part.id %}">{{ item.supplier_part.SKU }}</a></td>
     </tr>
     {% endif %}
+    {% if item.expiry_date %}
+    <tr>
+        <td><span class='fas fa-calendar-alt{% if item.is_expired %} icon-red{% endif %}'></span></td>
+        <td>{% trans "Expiry Date" %}</td>
+        <td>
+            {{ item.expiry_date }}
+            {% if item.is_expired %}
+            <span title='{% trans "This StockItem expired on" %} {{ item.expiry_date }}' class='label label-red'>{% trans "Expired" %}</span>
+            {% elif item.is_stale %}
+            <span title='{% trans "This StockItem expires on" %} {{ item.expiry_date }}' class='label label-yellow'>{% trans "Stale" %}</span>
+            {% endif %}
+        </td>
+    </tr>
+    {% endif %}
     <tr>
         <td><span class='fas fa-calendar-alt'></span></td>
         <td>{% trans "Last Updated" %}</td>
@@ -256,7 +368,7 @@ InvenTree | {% trans "Stock Item" %} - {{ item }}
         {% if item.stocktake_date %}
         <td>{{ item.stocktake_date }} <span class='badge'>{{ item.stocktake_user }}</span></td>
         {% else %}
-        <td>{% trans "No stocktake performed" %}</td>
+        <td><i>{% trans "No stocktake performed" %}</i></td>
         {% endif %}
     </tr>
     <tr>
@@ -275,22 +387,25 @@ InvenTree | {% trans "Stock Item" %} - {{ item }}
 {% endblock %}
 
 {% block js_ready %}
-
 {{ block.super }}
 
+enableNavbar({
+    label: 'item',
+    toggleId: '#item-menu-toggle',
+});
+
 loadTree("{% url 'api-stock-tree' %}",
-        "#stock-tree",
-        {
-            name: 'stock',
-        }
-    );
+    "#stock-tree",
+    {
+        name: 'stock',
+    }
+);
 
-    $("#toggle-stock-tree").click(function() {
-        toggleSideNav("#sidenav");
-        return false;
-    })
-
-    initSideNav();
+initNavTree({
+    label: 'stock',
+    treeId: '#sidenav-left',
+    toggleId: '#toggle-stock-tree',
+});
 
 $("#stock-serialize").click(function() {
     launchModalForm(
@@ -301,22 +416,25 @@ $("#stock-serialize").click(function() {
     );
 });
 
-$("#stock-test-report").click(function() {
+$('#stock-uninstall').click(function() {
+
     launchModalForm(
-        "{% url 'stock-item-test-report-select' item.id %}",
+        "{% url 'stock-item-uninstall' %}",
         {
-            follow: true,
+            data: {
+                'items[]': [{{ item.pk}}],
+            },
+            reload: true,
         }
     );
 });
 
+$("#stock-test-report").click(function() {
+    printTestReports([{{ item.pk }}]);
+});
+
 $("#print-label").click(function() {
-    launchModalForm(
-        "{% url 'stock-item-label-select' item.id %}",
-        {
-            follow: true,
-        }
-    )
+    printStockItemLabels([{{ item.pk }}]);
 });
 
 $("#stock-duplicate").click(function() {
@@ -345,22 +463,16 @@ $("#show-qr-code").click(function() {
     });
 });
 
-$("#link-barcode").click(function() {
+$("#barcode-link").click(function() {
     linkBarcodeDialog({{ item.id }});
 });
 
-$("#unlink-barcode").click(function() {
+$("#barcode-unlink").click(function() {
     unlinkBarcode({{ item.id }});
 });
 
-{% if item.in_stock %}
-
-$("#stock-assign-to-customer").click(function() {
-    launchModalForm("{% url 'stock-item-assign' item.id %}",
-        {
-            reload: true,
-        }
-    );
+$("#barcode-scan-into-location").click(function() {
+    scanItemsIntoLocation([{{ item.id }}]);
 });
 
 function itemAdjust(action) {
@@ -375,6 +487,29 @@ function itemAdjust(action) {
         }
     );
 }
+
+$('#stock-add').click(function() {
+    itemAdjust('add');
+});
+
+$("#stock-delete").click(function () {
+    launchModalForm(
+        "{% url 'stock-item-delete' item.id %}",
+        {
+            redirect: "{% url 'part-stock' item.part.id %}"
+        }
+    );
+});
+
+{% if item.in_stock %}
+
+$("#stock-assign-to-customer").click(function() {
+    launchModalForm("{% url 'stock-item-assign' item.id %}",
+        {
+            reload: true,
+        }
+    );
+});
 
 {% if item.part.has_variants %}
 $("#stock-convert").click(function() {
@@ -398,10 +533,6 @@ $('#stock-remove').click(function() {
     itemAdjust('take');
 });
 
-$('#stock-add').click(function() {
-    itemAdjust('add');
-});
-
 {% else %}
 
 $("#stock-return-from-customer").click(function() {
@@ -413,14 +544,5 @@ $("#stock-return-from-customer").click(function() {
 });
 
 {% endif %}
-
-$("#stock-delete").click(function () {
-    launchModalForm(
-        "{% url 'stock-item-delete' item.id %}",
-        {
-            redirect: "{% url 'part-stock' item.part.id %}"
-        }
-    );
-});
 
 {% endblock %}

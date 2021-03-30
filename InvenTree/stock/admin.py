@@ -83,8 +83,6 @@ class StockItemResource(ModelResource):
 
     sales_order = Field(attribute='sales_order', widget=widgets.ForeignKeyWidget(SalesOrder))
 
-    build_order = Field(attribute='build_order', widget=widgets.ForeignKeyWidget(Build))
-
     purchase_order = Field(attribute='purchase_order', widget=widgets.ForeignKeyWidget(PurchaseOrder))
 
     # Date management
@@ -116,6 +114,14 @@ class StockItemAdmin(ImportExportModelAdmin):
     resource_class = StockItemResource
 
     list_display = ('part', 'quantity', 'location', 'status', 'updated')
+
+    # A list of search fields which can be used for lookup on matching 'autocomplete' fields
+    search_fields = [
+        'part__name',
+        'part__description',
+        'serial',
+        'batch',
+    ]
 
 
 class StockAttachmentAdmin(admin.ModelAdmin):

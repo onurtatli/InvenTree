@@ -8,14 +8,19 @@ from __future__ import unicode_literals
 from django import forms
 from django.forms.utils import ErrorDict
 from django.utils.translation import ugettext as _
+from django.core.validators import MinValueValidator
+from django.core.exceptions import ValidationError
 
 from mptt.fields import TreeNodeChoiceField
 
 from InvenTree.helpers import GetExportFormats
 from InvenTree.forms import HelperForm
 from InvenTree.fields import RoundingDecimalFormField
+from InvenTree.fields import DatePickerFormField
 
 from report.models import TestReport
+
+from part.models import Part
 
 from .models import StockLocation, StockItem, StockItemTracking
 from .models import StockItemAttachment
@@ -85,7 +90,8 @@ class EditStockLocationForm(HelperForm):
         fields = [
             'name',
             'parent',
-            'description'
+            'description',
+            'owner',
         ]
 
 
@@ -104,7 +110,11 @@ class ConvertStockItemForm(HelperForm):
 class CreateStockItemForm(HelperForm):
     """ Form for creating a new StockItem """
 
-    serial_numbers = forms.CharField(label='Serial numbers', required=False, help_text=_('Enter unique serial numbers (or leave blank)'))
+    expiry_date = DatePickerFormField(
+        help_text=('Expiration date for this stock item'),
+    )
+
+    serial_numbers = forms.CharField(label=_('Serial numbers'), required=False, help_text=_('Enter unique serial numbers (or leave blank)'))
 
     def __init__(self, *args, **kwargs):
         
@@ -124,9 +134,13 @@ class CreateStockItemForm(HelperForm):
             'quantity',
             'batch',
             'serial_numbers',
+            'packaging',
+            'purchase_price',
+            'expiry_date',
             'link',
             'delete_on_deplete',
             'status',
+            'owner',
         ]
 
     # Custom clean to prevent complex StockItem.clean() logic from running (yet)
@@ -236,7 +250,7 @@ class TestReportFormatForm(HelperForm):
         templates = TestReport.objects.filter(enabled=True)
 
         for template in templates:
-            if template.matches_stock_item(self.stock_item):
+            if template.enabled and template.matches_stock_item(self.stock_item):
                 choices.append((template.pk, template))
 
         return choices
@@ -271,6 +285,81 @@ class ExportOptionsForm(HelperForm):
         self.fields['file_format'].choices = self.get_format_choices()
 
 
+class InstallStockForm(HelperForm):
+    """
+    Form for manually installing a stock item into another stock item
+    """
+
+    part = forms.ModelChoiceField(
+        queryset=Part.objects.all(),
+        widget=forms.HiddenInput()
+    )
+
+    stock_item = forms.ModelChoiceField(
+        required=True,
+        queryset=StockItem.objects.filter(StockItem.IN_STOCK_FILTER),
+        help_text=_('Stock item to install')
+    )
+
+    quantity_to_install = RoundingDecimalFormField(
+        max_digits=10, decimal_places=5,
+        initial=1,
+        label=_('Quantity'),
+        help_text=_('Stock quantity to assign'),
+        validators=[
+            MinValueValidator(0.001)
+        ]
+    )
+
+    notes = forms.CharField(
+        required=False,
+        help_text=_('Notes')
+    )
+
+    class Meta:
+        model = StockItem
+        fields = [
+            'part',
+            'stock_item',
+            'quantity_to_install',
+            'notes',
+        ]
+
+    def clean(self):
+
+        data = super().clean()
+
+        stock_item = data.get('stock_item', None)
+        quantity = data.get('quantity_to_install', None)
+
+        if stock_item and quantity and quantity > stock_item.quantity:
+            raise ValidationError({'quantity_to_install': _('Must not exceed available quantity')})
+
+        return data
+        
+
+class UninstallStockForm(forms.ModelForm):
+    """
+    Form for uninstalling a stock item which is installed in another item.
+    """
+
+    location = TreeNodeChoiceField(queryset=StockLocation.objects.all(), label=_('Location'), help_text=_('Destination location for uninstalled items'))
+
+    note = forms.CharField(label=_('Notes'), required=False, help_text=_('Add transaction note (optional)'))
+
+    confirm = forms.BooleanField(required=False, initial=False, label=_('Confirm uninstall'), help_text=_('Confirm removal of installed stock items'))
+
+    class Meta:
+
+        model = StockItem
+
+        fields = [
+            'location',
+            'note',
+            'confirm',
+        ]
+
+
 class AdjustStockForm(forms.ModelForm):
     """ Form for performing simple stock adjustments.
 
@@ -282,15 +371,15 @@ class AdjustStockForm(forms.ModelForm):
     This form is used for managing stock adjuments for single or multiple stock items.
     """
 
-    destination = TreeNodeChoiceField(queryset=StockLocation.objects.all(), label='Destination', required=True, help_text=_('Destination stock location'))
+    destination = TreeNodeChoiceField(queryset=StockLocation.objects.all(), label=_('Destination'), required=True, help_text=_('Destination stock location'))
     
-    note = forms.CharField(label='Notes', required=True, help_text='Add note (required)')
+    note = forms.CharField(label=_('Notes'), required=True, help_text=_('Add note (required)'))
     
     # transaction = forms.BooleanField(required=False, initial=False, label='Create Transaction', help_text='Create a stock transaction for these parts')
     
-    confirm = forms.BooleanField(required=False, initial=False, label='Confirm stock adjustment', help_text=_('Confirm movement of stock items'))
+    confirm = forms.BooleanField(required=False, initial=False, label=_('Confirm stock adjustment'), help_text=_('Confirm movement of stock items'))
 
-    set_loc = forms.BooleanField(required=False, initial=False, label='Set Default Location', help_text=_('Set the destination as the default location for selected parts'))
+    set_loc = forms.BooleanField(required=False, initial=False, label=_('Set Default Location'), help_text=_('Set the destination as the default location for selected parts'))
 
     class Meta:
         model = StockItem
@@ -312,6 +401,10 @@ class EditStockItemForm(HelperForm):
     part - Cannot be edited after creation
     """
 
+    expiry_date = DatePickerFormField(
+        help_text=('Expiration date for this stock item'),
+    )
+
     class Meta:
         model = StockItem
 
@@ -320,8 +413,12 @@ class EditStockItemForm(HelperForm):
             'serial',
             'batch',
             'status',
+            'expiry_date',
+            'purchase_price',
+            'packaging',
             'link',
             'delete_on_deplete',
+            'owner',
         ]
 
 

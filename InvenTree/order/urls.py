@@ -21,6 +21,7 @@ purchase_order_detail_urls = [
 
     url(r'^notes/', views.PurchaseOrderNotes.as_view(), name='po-notes'),
 
+    url(r'^received/', views.PurchaseOrderDetail.as_view(template_name='order/po_received_items.html'), name='po-received'),
     url(r'^attachments/', views.PurchaseOrderDetail.as_view(template_name='order/po_attachments.html'), name='po-attachments'),
     url(r'^.*$', views.PurchaseOrderDetail.as_view(), name='po-detail'),
 ]
@@ -80,6 +81,7 @@ sales_order_urls = [
     # URLs for sales order allocations
     url(r'^allocation/', include([
         url(r'^new/', views.SalesOrderAllocationCreate.as_view(), name='so-allocation-create'),
+        url(r'^assign-serials/', views.SalesOrderAssignSerials.as_view(), name='so-assign-serials'),
         url(r'(?P<pk>\d+)/', include([
             url(r'^edit/', views.SalesOrderAllocationEdit.as_view(), name='so-allocation-edit'),
             url(r'^delete/', views.SalesOrderAllocationDelete.as_view(), name='so-allocation-delete'),

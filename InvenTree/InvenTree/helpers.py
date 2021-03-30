@@ -12,11 +12,23 @@ from decimal import Decimal
 
 from wsgiref.util import FileWrapper
 from django.http import StreamingHttpResponse
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ValidationError, FieldError
 from django.utils.translation import ugettext as _
 
-from .version import inventreeVersion, inventreeInstanceName
+from django.contrib.auth.models import Permission
+
+import InvenTree.version
+
+from common.models import InvenTreeSetting
 from .settings import MEDIA_URL, STATIC_URL
+
+
+def getSetting(key, backup_value=None):
+    """
+    Shortcut for reading a setting value from the database
+    """
+
+    return InvenTreeSetting.get_setting(key, backup_value=backup_value)
 
 
 def generateTestKey(test_name):
@@ -106,6 +118,19 @@ def str2bool(text, test=True):
         return str(text).lower() in ['1', 'y', 'yes', 't', 'true', 'ok', 'on', ]
     else:
         return str(text).lower() in ['0', 'n', 'no', 'none', 'f', 'false', 'off', ]
+
+
+def is_bool(text):
+    """
+    Determine if a string value 'looks' like a boolean.
+    """
+
+    if str2bool(text, True):
+        return True
+    elif str2bool(text, False):
+        return True
+    else:
+        return False
 
 
 def isNull(text):
@@ -242,7 +267,7 @@ def WrapWithQuotes(text, quote='"'):
     return text
 
 
-def MakeBarcode(object_name, object_pk, object_data, **kwargs):
+def MakeBarcode(object_name, object_pk, object_data={}, **kwargs):
     """ Generate a string for a barcode. Adds some global InvenTree parameters.
 
     Args:
@@ -255,7 +280,7 @@ def MakeBarcode(object_name, object_pk, object_data, **kwargs):
         json string of the supplied data plus some other data
     """
 
-    brief = kwargs.get('brief', False)
+    brief = kwargs.get('brief', True)
 
     data = {}
 
@@ -263,8 +288,8 @@ def MakeBarcode(object_name, object_pk, object_data, **kwargs):
         data[object_name] = object_pk
     else:
         data['tool'] = 'InvenTree'
-        data['version'] = inventreeVersion()
-        data['instance'] = inventreeInstanceName()
+        data['version'] = InvenTree.version.inventreeVersion()
+        data['instance'] = InvenTree.version.inventreeInstanceName()
 
         # Ensure PK is included
         object_data['id'] = object_pk
@@ -312,7 +337,7 @@ def DownloadFile(data, filename, content_type='application/text'):
     return response
 
 
-def ExtractSerialNumbers(serials, expected_quantity):
+def extract_serial_numbers(serials, expected_quantity):
     """ Attempt to extract serial numbers from an input string.
     - Serial numbers must be integer values
     - Serial numbers must be positive
@@ -371,14 +396,10 @@ def ExtractSerialNumbers(serials, expected_quantity):
                 continue
 
         else:
-            try:
-                n = int(group)
-                if n in numbers:
-                    errors.append(_("Duplicate serial: {n}".format(n=n)))
-                else:
-                    numbers.append(n)
-            except ValueError:
-                errors.append(_("Invalid group: {g}".format(g=group)))
+            if group in numbers:
+                errors.append(_("Duplicate serial: {g}".format(g=group)))
+            else:
+                numbers.append(group)
 
     if len(errors) > 0:
         raise ValidationError(errors)
@@ -393,7 +414,7 @@ def ExtractSerialNumbers(serials, expected_quantity):
     return numbers
 
 
-def validateFilterString(value):
+def validateFilterString(value, model=None):
     """
     Validate that a provided filter string looks like a list of comma-separated key=value pairs
 
@@ -443,4 +464,100 @@ def validateFilterString(value):
 
         results[k] = v
 
+    # If a model is provided, verify that the provided filters can be used against it
+    if model is not None:
+        try:
+            model.objects.filter(**results)
+        except FieldError as e:
+            raise ValidationError(
+                str(e),
+            )
+
     return results
+
+
+def addUserPermission(user, permission):
+    """
+    Shortcut function for adding a certain permission to a user.
+    """
+    
+    perm = Permission.objects.get(codename=permission)
+    user.user_permissions.add(perm)
+
+
+def addUserPermissions(user, permissions):
+    """
+    Shortcut function for adding multiple permissions to a user.
+    """
+
+    for permission in permissions:
+        addUserPermission(user, permission)
+
+
+def getMigrationFileNames(app):
+    """
+    Return a list of all migration filenames for provided app
+    """
+
+    local_dir = os.path.dirname(os.path.abspath(__file__))
+
+    migration_dir = os.path.join(local_dir, '..', app, 'migrations')
+
+    files = os.listdir(migration_dir)
+
+    # Regex pattern for migration files
+    pattern = r"^[\d]+_.*\.py$"
+
+    migration_files = []
+
+    for f in files:
+        if re.match(pattern, f):
+            migration_files.append(f)
+
+    return migration_files
+
+
+def getOldestMigrationFile(app, exclude_extension=True, ignore_initial=True):
+    """
+    Return the filename associated with the oldest migration
+    """
+
+    oldest_num = -1
+    oldest_file = None
+
+    for f in getMigrationFileNames(app):
+
+        if ignore_initial and f.startswith('0001_initial'):
+            continue
+
+        num = int(f.split('_')[0])
+        
+        if oldest_file is None or num < oldest_num:
+            oldest_num = num
+            oldest_file = f
+
+    if exclude_extension:
+        oldest_file = oldest_file.replace('.py', '')
+
+    return oldest_file
+    
+
+def getNewestMigrationFile(app, exclude_extension=True):
+    """
+    Return the filename associated with the newest migration
+    """
+
+    newest_file = None
+    newest_num = -1
+
+    for f in getMigrationFileNames(app):
+        num = int(f.split('_')[0])
+
+        if newest_file is None or num > newest_num:
+            newest_num = num
+            newest_file = f
+
+    if exclude_extension:
+        newest_file = newest_file.replace('.py', '')
+
+    return newest_file

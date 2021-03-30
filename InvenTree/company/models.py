@@ -8,15 +8,16 @@ from __future__ import unicode_literals
 import os
 
 import math
-from decimal import Decimal
 
 from django.utils.translation import gettext_lazy as _
 from django.core.validators import MinValueValidator
 from django.db import models
-from django.db.models import Sum, Q
+from django.db.models import Sum, Q, UniqueConstraint
 
 from django.apps import apps
 from django.urls import reverse
+
+from moneyed import CURRENCIES
 
 from markdownx.models import MarkdownxField
 
@@ -24,9 +25,13 @@ from stdimage.models import StdImageField
 
 from InvenTree.helpers import getMediaUrl, getBlankImage, getBlankThumbnail
 from InvenTree.helpers import normalize
-from InvenTree.fields import InvenTreeURLField, RoundingDecimalField
+from InvenTree.fields import InvenTreeURLField
 from InvenTree.status_codes import PurchaseOrderStatus
-from common.models import Currency
+
+import InvenTree.validators
+
+import common.models
+import common.settings
 
 
 def rename_company_image(instance, filename):
@@ -77,12 +82,16 @@ class Company(models.Model):
         is_customer: boolean value, is this company a customer
         is_supplier: boolean value, is this company a supplier
         is_manufacturer: boolean value, is this company a manufacturer
+        currency_code: Specifies the default currency for the company
     """
 
     class Meta:
         ordering = ['name', ]
+        constraints = [
+            UniqueConstraint(fields=['name', 'email'], name='unique_name_email_pair')
+        ]
 
-    name = models.CharField(max_length=100, blank=False, unique=True,
+    name = models.CharField(max_length=100, blank=False,
                             help_text=_('Company name'),
                             verbose_name=_('Company name'))
 
@@ -98,7 +107,8 @@ class Company(models.Model):
                              verbose_name=_('Phone number'),
                              blank=True, help_text=_('Contact phone number'))
 
-    email = models.EmailField(blank=True, verbose_name=_('Email'), help_text=_('Contact email address'))
+    email = models.EmailField(blank=True, null=True,
+                              verbose_name=_('Email'), help_text=_('Contact email address'))
 
     contact = models.CharField(max_length=100,
                                verbose_name=_('Contact'),
@@ -121,6 +131,30 @@ class Company(models.Model):
     is_supplier = models.BooleanField(default=True, help_text=_('Do you purchase items from this company?'))
 
     is_manufacturer = models.BooleanField(default=False, help_text=_('Does this company manufacture parts?'))
+
+    currency = models.CharField(
+        max_length=3,
+        verbose_name=_('Currency'),
+        blank=True,
+        help_text=_('Default currency used for this company'),
+        validators=[InvenTree.validators.validate_currency_code],
+    )
+
+    @property
+    def currency_code(self):
+        """
+        Return the currency code associated with this company.
+        
+        - If the currency code is invalid, use the default currency
+        - If the currency code is not specified, use the default currency
+        """
+
+        code = self.currency
+
+        if code not in CURRENCIES:
+            code = common.settings.currency_code_default()
+
+        return code
 
     def __str__(self):
         """ Get string representation of a Company """
@@ -279,7 +313,6 @@ class SupplierPart(models.Model):
                              verbose_name=_('Base Part'),
                              limit_choices_to={
                                  'purchaseable': True,
-                                 'is_template': False,
                              },
                              help_text=_('Select part'),
                              )
@@ -287,31 +320,55 @@ class SupplierPart(models.Model):
     supplier = models.ForeignKey(Company, on_delete=models.CASCADE,
                                  related_name='supplied_parts',
                                  limit_choices_to={'is_supplier': True},
+                                 verbose_name=_('Supplier'),
                                  help_text=_('Select supplier'),
                                  )
 
-    SKU = models.CharField(max_length=100, help_text=_('Supplier stock keeping unit'))
+    SKU = models.CharField(
+        max_length=100,
+        verbose_name=_('SKU'),
+        help_text=_('Supplier stock keeping unit')
+    )
 
     manufacturer = models.ForeignKey(
         Company,
         on_delete=models.SET_NULL,
         related_name='manufactured_parts',
-        limit_choices_to={'is_manufacturer': True},
+        limit_choices_to={
+            'is_manufacturer': True
+        },
+        verbose_name=_('Manufacturer'),
         help_text=_('Select manufacturer'),
         null=True, blank=True
     )
 
-    MPN = models.CharField(max_length=100, blank=True, help_text=_('Manufacturer part number'))
+    MPN = models.CharField(
+        max_length=100, blank=True, null=True,
+        verbose_name=_('MPN'),
+        help_text=_('Manufacturer part number')
+    )
 
-    link = InvenTreeURLField(blank=True, help_text=_('URL for external supplier part link'))
+    link = InvenTreeURLField(
+        blank=True, null=True,
+        verbose_name=_('Link'),
+        help_text=_('URL for external supplier part link')
+    )
 
-    description = models.CharField(max_length=250, blank=True, help_text=_('Supplier part description'))
+    description = models.CharField(
+        max_length=250, blank=True, null=True,
+        verbose_name=_('Description'),
+        help_text=_('Supplier part description')
+    )
 
-    note = models.CharField(max_length=100, blank=True, help_text=_('Notes'))
+    note = models.CharField(
+        max_length=100, blank=True, null=True,
+        verbose_name=_('Note'),
+        help_text=_('Notes')
+    )
 
     base_cost = models.DecimalField(max_digits=10, decimal_places=3, default=0, validators=[MinValueValidator(0)], help_text=_('Minimum charge (e.g. stocking fee)'))
 
-    packaging = models.CharField(max_length=50, blank=True, help_text=_('Part packaging'))
+    packaging = models.CharField(max_length=50, blank=True, null=True, help_text=_('Part packaging'))
     
     multiple = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)], help_text=('Order multiple'))
 
@@ -346,7 +403,26 @@ class SupplierPart(models.Model):
     def unit_pricing(self):
         return self.get_price(1)
 
-    def get_price(self, quantity, moq=True, multiples=True):
+    def add_price_break(self, quantity, price):
+        """
+        Create a new price break for this part
+
+        args:
+            quantity - Numerical quantity
+            price - Must be a Money object
+        """
+
+        # Check if a price break at that quantity already exists...
+        if self.price_breaks.filter(quantity=quantity, part=self.pk).exists():
+            return
+
+        SupplierPriceBreak.objects.create(
+            part=self,
+            quantity=quantity,
+            price=price
+        )
+
+    def get_price(self, quantity, moq=True, multiples=True, currency=None):
         """ Calculate the supplier price based on quantity price breaks.
 
         - Don't forget to add in flat-fee cost (base_cost field)
@@ -368,6 +444,10 @@ class SupplierPart(models.Model):
         pb_quantity = -1
         pb_cost = 0.0
 
+        if currency is None:
+            # Default currency selection
+            currency = common.models.InvenTreeSetting.get_setting('INVENTREE_DEFAULT_CURRENCY')
+
         for pb in self.price_breaks.all():
             # Ignore this pricebreak (quantity is too high)
             if pb.quantity > quantity:
@@ -378,8 +458,9 @@ class SupplierPart(models.Model):
             # If this price-break quantity is the largest so far, use it!
             if pb.quantity > pb_quantity:
                 pb_quantity = pb.quantity
-                # Convert everything to base currency
-                pb_cost = pb.converted_cost
+
+                # Convert everything to the selected currency
+                pb_cost = pb.convert_to(currency)
 
         if pb_found:
             cost = pb_cost * quantity
@@ -423,17 +504,21 @@ class SupplierPart(models.Model):
         return str(self)
 
     def __str__(self):
-        s = "{supplier} ({sku})".format(
-            sku=self.SKU,
-            supplier=self.supplier.name)
+        s = ''
+
+        if self.part.IPN:
+            s += f'{self.part.IPN}'
+            s += ' | '
+
+        s += f'{self.supplier.name} | {self.SKU}'
 
         if self.manufacturer_string:
-            s = s + ' - ' + self.manufacturer_string
+            s = s + ' | ' + self.manufacturer_string
         
         return s
 
 
-class SupplierPriceBreak(models.Model):
+class SupplierPriceBreak(common.models.PriceBreak):
     """ Represents a quantity price break for a SupplierPart.
     - Suppliers can offer discounts at larger quantities
     - SupplierPart(s) may have zero-or-more associated SupplierPriceBreak(s)
@@ -447,23 +532,6 @@ class SupplierPriceBreak(models.Model):
 
     part = models.ForeignKey(SupplierPart, on_delete=models.CASCADE, related_name='pricebreaks')
 
-    quantity = RoundingDecimalField(max_digits=15, decimal_places=5, default=1, validators=[MinValueValidator(1)])
-
-    cost = RoundingDecimalField(max_digits=10, decimal_places=5, validators=[MinValueValidator(0)])
-
-    currency = models.ForeignKey(Currency, blank=True, null=True, on_delete=models.SET_NULL)
-
-    @property
-    def converted_cost(self):
-        """ Return the cost of this price break, converted to the base currency """
-
-        scaler = Decimal(1.0)
-
-        if self.currency:
-            scaler = self.currency.value
-
-        return self.cost * scaler
-
     class Meta:
         unique_together = ("part", "quantity")
 
@@ -471,7 +539,4 @@ class SupplierPriceBreak(models.Model):
         db_table = 'part_supplierpricebreak'
 
     def __str__(self):
-        return "{mpn} - {cost} @ {quan}".format(
-            mpn=self.part.MPN,
-            cost=self.cost,
-            quan=self.quantity)
+        return f'{self.part.MPN} - {self.price} @ {self.quantity}'

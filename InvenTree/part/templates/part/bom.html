@@ -2,21 +2,15 @@
 {% load static %}
 {% load i18n %}
 
-{% block css %}
+{% block menubar %}
+{% include 'part/navbar.html' with tab='bom' %}
+{% endblock %}
 
+{% block heading %}
+{% trans "Bill of Materials" %}
 {% endblock %}
 
 {% block details %}
-
-{% include 'part/tabs.html' with tab='bom' %}
-
-<h3>{% trans "Bill of Materials" %}</h3>
-
-{% if part.has_complete_bom_pricing == False %}
-<div class='alert alert-block alert-warning'>
-    The BOM for <i>{{ part.full_name }}</i> does not have complete pricing information
-</div>
-{% endif %}
 {% if part.bom_checked_date %}
 {% if part.is_bom_valid %}
 <div class='alert alert-block alert-info'>
@@ -32,40 +26,54 @@
 </div>
 {% endif %}
 
-<div id='button-toolbar' class="btn-group" role="group" aria-label="...">
-    {% if editing_enabled %}
-    <button class='btn btn-default action-button' type='button' title='{% trans "Remove selected BOM items" %}' id='bom-item-delete'><span class='fas fa-trash-alt'></span></button>
-    <button class='btn btn-default action-button' type='button' title='{% trans "Import BOM data" %}' id='bom-upload'><span class='fas fa-file-upload'></span></button>
-    <button class='btn btn-default action-button' type='button' title='{% trans "New BOM Item" %}' id='bom-item-new'><span class='fas fa-plus-circle'></span></button>
-    <button class='btn btn-default action-button' type='button' title='{% trans "Finish Editing" %}' id='editing-finished'><span class='fas fa-check-circle'></span></button>
-    {% elif part.active %}
-    <button class='btn btn-default action-button' type='button' title='{% trans "Edit BOM" %}' id='edit-bom'><span class='fas fa-edit'></span></button>
-    {% if part.is_bom_valid == False %}
-    <button class='btn btn-default action-button' id='validate-bom' title='{% trans "Validate Bill of Materials" %}' type='button'><span class='fas fa-clipboard-check'></span></button>
-    {% endif %}
-    <button title='{% trans "Export Bill of Materials" %}' class='btn btn-default action-button' id='download-bom' type='button'><span class='fas fa-file-download'></span></button>
-    {% endif %}
+<div id='button-toolbar'>
+    <div class="btn-group" role="group" aria-label="...">
+        {% if editing_enabled %}
+        <button class='btn btn-default' type='button' title='{% trans "Remove selected BOM items" %}' id='bom-item-delete'>
+            <span class='fas fa-trash-alt icon-red'></span>
+        </button>
+        <button class='btn btn-primary' type='button' title='{% trans "Import BOM data" %}' id='bom-upload'>
+            <span class='fas fa-file-upload'></span>
+        </button>
+        {% if part.variant_of %}
+        <button class='btn btn-default' type='button' title='{% trans "Copy BOM from parent part" %}' id='bom-duplicate'>
+            <span class='fas fa-clone'></span>
+        </button>
+        {% endif %}
+        <button class='btn btn-default' type='button' title='{% trans "New BOM Item" %}' id='bom-item-new'>
+            <span class='fas fa-plus-circle'></span>
+        </button>
+        <button class='btn btn-success' type='button' title='{% trans "Finish Editing" %}' id='editing-finished'>
+            <span class='fas fa-check-circle'></span>
+        </button>
+        {% elif part.active %}
+        {% if roles.part.change %}
+        <button class='btn btn-primary' type='button' title='{% trans "Edit BOM" %}' id='edit-bom'>
+            <span class='fas fa-edit'></span>
+        </button>
+        {% if part.is_bom_valid == False %}
+        <button class='btn btn-success' id='validate-bom' title='{% trans "Validate Bill of Materials" %}' type='button'>
+            <span class='fas fa-clipboard-check'></span>
+        </button>
+        {% endif %}
+        {% endif %}
+        {% endif %}
+        <button title='{% trans "Export Bill of Materials" %}' class='btn btn-default' id='download-bom' type='button'>
+            <span class='fas fa-file-download'></span>
+        </button>
+        <button title='{% trans "Print BOM Report" %}' class='btn btn-default' id='print-bom-report' type='button'>
+            <span class='fas fa-file-pdf'></span>
+        </button>
+        <div class='filter-list' id='filter-list-bom'>
+            <!-- Empty div (will be filled out with avilable BOM filters) -->
+        </div>
+    </div>
 </div>
 
-<table class='table table-striped table-condensed' data-toolbar="#button-toolbar" id='bom-table'>
+<table class='table table-bom table-condensed' data-toolbar="#button-toolbar" id='bom-table'>
 </table>
 
-<table class='table table-striped table-condensed' id='test-table'></table>
-
 {% endblock %}
-
-{% block js_load %}
-{{ block.super }}
-
-<!-- jquery-treegrid -->
-<script type='text/javascript' src='{% static "treegrid/js/jquery.treegrid.js" %}'></script>
-<script type='text/javascript' src='{% static "treegrid/js/jquery.treegrid.bootstrap3.js" %}'></script>
-
-<!-- boostrap-table-treegrid -->
-<script type='text/javascript' src='{% static "bootstrap-table/extensions/treegrid/bootstrap-table-treegrid.js" %}'></script>
-
-{% endblock %}
-
 
 {% block js_ready %}
 {{ block.super }}
@@ -90,8 +98,52 @@
         location.href = "{% url 'part-bom' part.id %}";
     });
 
+    $('#bom-item-delete').click(function() {
+
+        // Get a list of the selected BOM items
+        var rows = $("#bom-table").bootstrapTable('getSelections');
+
+        // TODO - In the future, display (in the dialog) which items are going to be deleted
+
+        showQuestionDialog(
+            '{% trans "Delete selected BOM items?" %}',
+            '{% trans "All selected BOM items will be deleted" %}',
+            {
+                accept: function() {
+
+                    // Keep track of each DELETE request
+                    var requests = [];
+
+                    rows.forEach(function(row) {
+                        requests.push(
+                            inventreeDelete(
+                                `/api/bom/${row.pk}/`,
+                            )
+                        );
+                    });
+
+                    // Wait for *all* the requests to complete
+                    $.when.apply($, requests).then(function() {
+                        $('#bom-table').bootstrapTable('refresh');
+                    });
+                }
+            }
+        );
+    });
+
     $('#bom-upload').click(function() {
         location.href = "{% url 'upload-bom' part.id %}";
+    });
+
+    $('#bom-duplicate').click(function() {
+        launchModalForm(
+            "{% url 'duplicate-bom' part.id %}",
+            {
+                success: function() {
+                    $('#bom-table').bootstrapTable('refresh');
+                }
+            }
+        );
     });
 
     $("#bom-item-new").click(function () {
@@ -104,8 +156,8 @@
                 secondary: [
                     {
                         field: 'sub_part',
-                        label: 'New Part',
-                        title: 'Create New Part',
+                        label: '{% trans "New Part" %}',
+                        title: '{% trans "Create New Part" %}',
                         url: "{% url 'part-create' %}",
                     },
                 ]
@@ -139,5 +191,9 @@
     });
 
     {% endif %}
+
+    $("#print-bom-report").click(function() {
+        printBomReports([{{ part.pk }}]);
+    });
 
 {% endblock %}

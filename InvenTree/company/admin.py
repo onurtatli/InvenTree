@@ -13,7 +13,6 @@ from .models import SupplierPart
 from .models import SupplierPriceBreak
 
 from part.models import Part
-from common.models import Currency
 
 
 class CompanyResource(ModelResource):
@@ -32,9 +31,16 @@ class CompanyAdmin(ImportExportModelAdmin):
 
     list_display = ('name', 'website', 'contact')
 
+    search_fields = [
+        'name',
+        'description',
+    ]
+
 
 class SupplierPartResource(ModelResource):
-    """ Class for managing SupplierPart data import/export """
+    """
+    Class for managing SupplierPart data import/export
+    """
 
     part = Field(attribute='part', widget=widgets.ForeignKeyWidget(Part))
 
@@ -47,7 +53,7 @@ class SupplierPartResource(ModelResource):
     class Meta:
         model = SupplierPart
         skip_unchanged = True
-        report_skipped = False
+        report_skipped = True
         clean_model_instances = True
 
 
@@ -57,13 +63,18 @@ class SupplierPartAdmin(ImportExportModelAdmin):
 
     list_display = ('part', 'supplier', 'SKU')
 
+    search_fields = [
+        'company__name',
+        'part__name',
+        'MPN',
+        'SKU',
+    ]
+
 
 class SupplierPriceBreakResource(ModelResource):
     """ Class for managing SupplierPriceBreak data import/export """
 
     part = Field(attribute='part', widget=widgets.ForeignKeyWidget(SupplierPart))
-
-    currency = Field(attribute='currency', widget=widgets.ForeignKeyWidget(Currency))
 
     supplier_id = Field(attribute='part__supplier__pk', readonly=True)
 
@@ -86,7 +97,7 @@ class SupplierPriceBreakAdmin(ImportExportModelAdmin):
 
     resource_class = SupplierPriceBreakResource
 
-    list_display = ('part', 'quantity', 'cost')
+    list_display = ('part', 'quantity', 'price')
 
 
 admin.site.register(Company, CompanyAdmin)

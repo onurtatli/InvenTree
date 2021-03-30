@@ -7,16 +7,24 @@ from __future__ import unicode_literals
 
 import os
 import sys
+import logging
 
 import datetime
 
 from django.db import models
 from django.conf import settings
+from django.core.exceptions import ValidationError, FieldError
 
+from django.template.loader import render_to_string
+
+from django.core.files.storage import FileSystemStorage
 from django.core.validators import FileExtensionValidator
-from django.core.exceptions import ValidationError
 
-from stock.models import StockItem
+import build.models
+import common.models
+import part.models
+import stock.models
+import order.models
 
 from InvenTree.helpers import validateFilterString
 
@@ -29,32 +37,78 @@ except OSError as err:
     print("You may require some further system packages to be installed.")
     sys.exit(1)
 
-# Conditional import if LaTeX templating is enabled
-if settings.LATEX_ENABLED:
-    try:
-        from django_tex.shortcuts import render_to_pdf
-        from django_tex.core import render_template_with_context
-        from django_tex.exceptions import TexError
-    except OSError as err:
-        print("OSError: {e}".format(e=err))
-        print("You may not have a working LaTeX toolchain installed?")
-        sys.exit(1)
 
-from django.http import HttpResponse
+logger = logging.getLogger(__name__)
 
 
-class TexResponse(HttpResponse):
-    def __init__(self, content, filename=None):
-        super().__init__(content_type="application/txt")
-        self["Content-Disposition"] = 'filename="{}"'.format(filename)
-        self.write(content)
+class ReportFileUpload(FileSystemStorage):
+    """
+    Custom implementation of FileSystemStorage class.
+
+    When uploading a report (or a snippet / asset / etc),
+    it is often important to ensure the filename is not arbitrarily *changed*,
+    if the name of the uploaded file is identical to the currently stored file.
+
+    For example, a snippet or asset file is referenced in a template by filename,
+    and we do not want that filename to change when we upload a new *version*
+    of the snippet or asset file.
+    
+    This uploader class performs the following pseudo-code function:
+
+    - If the model is *new*, proceed as normal
+    - If the model is being updated:
+        a) If the new filename is *different* from the existing filename, proceed as normal
+        b) If the new filename is *identical* to the existing filename, we want to overwrite the existing file
+    """
+
+    def get_available_name(self, name, max_length=None):
+
+        return super().get_available_name(name, max_length)
 
 
 def rename_template(instance, filename):
 
-    filename = os.path.basename(filename)
+    return instance.rename_file(filename)
 
-    return os.path.join('report', 'report_template', instance.getSubdir(), filename)
+
+def validate_stock_item_report_filters(filters):
+    """
+    Validate filter string against StockItem model
+    """
+
+    return validateFilterString(filters, model=stock.models.StockItem)
+
+
+def validate_part_report_filters(filters):
+    """
+    Validate filter string against Part model
+    """
+
+    return validateFilterString(filters, model=part.models.Part)
+
+
+def validate_build_report_filters(filters):
+    """
+    Validate filter string against Build model
+    """
+
+    return validateFilterString(filters, model=build.models.Build)
+
+
+def validate_purchase_order_filters(filters):
+    """
+    Validate filter string against PurchaseOrder model
+    """
+
+    return validateFilterString(filters, model=order.models.PurchaseOrder)
+
+
+def validate_sales_order_filters(filters):
+    """
+    Validate filter string against SalesOrder model
+    """
+
+    return validateFilterString(filters, model=order.models.SalesOrder)
 
 
 class WeasyprintReportMixin(WeasyTemplateResponseMixin):
@@ -72,16 +126,34 @@ class WeasyprintReportMixin(WeasyTemplateResponseMixin):
         self.pdf_filename = kwargs.get('filename', 'report.pdf')
 
 
-class ReportTemplateBase(models.Model):
+class ReportBase(models.Model):
     """
-    Reporting template model.
+    Base class for uploading html templates
     """
+
+    class Meta:
+        abstract = True
+
+    def save(self, *args, **kwargs):
+
+        # Increment revision number
+        self.revision += 1
+
+        super().save()
 
     def __str__(self):
         return "{n} - {d}".format(n=self.name, d=self.description)
 
-    def getSubdir(self):
+    @classmethod
+    def getSubdir(cls):
         return ''
+
+    def rename_file(self, filename):
+        # Function for renaming uploaded file
+
+        filename = os.path.basename(filename)
+
+        return os.path.join('report', 'report_template', self.getSubdir(), filename)
 
     @property
     def extension(self):
@@ -89,7 +161,56 @@ class ReportTemplateBase(models.Model):
 
     @property
     def template_name(self):
-        return os.path.join('report_template', self.getSubdir(), os.path.basename(self.template.name))
+        """
+        Returns the file system path to the template file.
+        Required for passing the file to an external process
+        """
+
+        template = self.template.name
+        template = template.replace('/', os.path.sep)
+        template = template.replace('\\', os.path.sep)
+
+        template = os.path.join(settings.MEDIA_ROOT, template)
+
+        return template
+
+    name = models.CharField(
+        blank=False, max_length=100,
+        verbose_name=_('Name'),
+        help_text=_('Template name'),
+    )
+
+    template = models.FileField(
+        upload_to=rename_template,
+        verbose_name=_('Template'),
+        help_text=_("Report template file"),
+        validators=[FileExtensionValidator(allowed_extensions=['html', 'htm'])],
+    )
+
+    description = models.CharField(
+        max_length=250,
+        verbose_name=_('Description'),
+        help_text=_("Report template description")
+    )
+
+    revision = models.PositiveIntegerField(
+        default=1,
+        verbose_name=_("Revision"),
+        help_text=_("Report revision number (auto-increments)"),
+        editable=False,
+    )
+
+
+class ReportTemplateBase(ReportBase):
+    """
+    Reporting template model.
+
+    Able to be passed context data
+
+    """
+
+    # Pass a single top-level object to the report template
+    object_to_print = None
 
     def get_context_data(self, request):
         """
@@ -98,66 +219,60 @@ class ReportTemplateBase(models.Model):
 
         return {}
 
+    def context(self, request):
+        """
+        All context to be passed to the renderer.
+        """
+
+        context = self.get_context_data(request)
+
+        context['base_url'] = common.models.InvenTreeSetting.get_setting('INVENTREE_BASE_URL')
+        context['date'] = datetime.datetime.now().date()
+        context['datetime'] = datetime.datetime.now()
+        context['default_page_size'] = common.models.InvenTreeSetting.get_setting('REPORT_DEFAULT_PAGE_SIZE')
+        context['report_description'] = self.description
+        context['report_name'] = self.name
+        context['report_revision'] = self.revision
+        context['request'] = request
+        context['user'] = request.user
+
+        return context
+
+    def render_as_string(self, request, **kwargs):
+        """
+        Render the report to a HTML stiring.
+
+        Useful for debug mode (viewing generated code)
+        """
+
+        return render_to_string(self.template_name, self.context(request), request)
+
     def render(self, request, **kwargs):
         """
         Render the template to a PDF file.
 
-        Supported template formats:
-            .tex - Uses django-tex plugin to render LaTeX template against an installed LaTeX engine
-            .html - Uses django-weasyprint plugin to render HTML template against Weasyprint
+        Uses django-weasyprint plugin to render HTML template against Weasyprint
         """
 
-        filename = kwargs.get('filename', 'report.pdf')
+        # TODO: Support custom filename generation!
+        # filename = kwargs.get('filename', 'report.pdf')
 
-        context = self.get_context_data(request)
+        # Render HTML template to PDF
+        wp = WeasyprintReportMixin(
+            request,
+            self.template_name,
+            base_url=request.build_absolute_uri("/"),
+            presentational_hints=True,
+            **kwargs)
 
-        context['request'] = request
-        context['user'] = request.user
-        context['datetime'] = datetime.datetime.now()
-
-        if self.extension == '.tex':
-            # Render LaTeX template to PDF
-            if settings.LATEX_ENABLED:
-                # Attempt to render to LaTeX template
-                # If there is a rendering error, return the (partially rendered) template,
-                # so at least we can debug what is going on
-                try:
-                    rendered = render_template_with_context(self.template_name, context)
-                    return render_to_pdf(request, self.template_name, context, filename=filename)
-                except TexError:
-                    return TexResponse(rendered, filename="error.tex")
-            else:
-                return ValidationError("Enable LaTeX support in config.yaml")
-        elif self.extension in ['.htm', '.html']:
-            # Render HTML template to PDF
-            wp = WeasyprintReportMixin(request, self.template_name, **kwargs)
-            return wp.render_to_response(context, **kwargs)
-
-    name = models.CharField(
-        blank=False, max_length=100,
-        help_text=_('Template name'),
-        unique=True,
-    )
-
-    template = models.FileField(
-        upload_to=rename_template,
-        help_text=_("Report template file"),
-        validators=[FileExtensionValidator(allowed_extensions=['html', 'htm', 'tex'])],
-    )
-
-    description = models.CharField(max_length=250, help_text=_("Report template description"))
+        return wp.render_to_response(
+            self.context(request),
+            **kwargs)
 
     enabled = models.BooleanField(
         default=True,
+        verbose_name=_('Enabled'),
         help_text=_('Report template is enabled'),
-        verbose_name=_('Enabled')
-    )
-
-    filters = models.CharField(
-        blank=True,
-        max_length=250,
-        help_text=_("Part query filters (comma-separated list of key=value pairs)"),
-        validators=[validateFilterString]
     )
 
     class Meta:
@@ -169,37 +284,243 @@ class TestReport(ReportTemplateBase):
     Render a TestReport against a StockItem object.
     """
 
-    def getSubdir(self):
+    @classmethod
+    def getSubdir(cls):
         return 'test'
 
-    # Requires a stock_item object to be given to it before rendering
-    stock_item = None
+    filters = models.CharField(
+        blank=True,
+        max_length=250,
+        verbose_name=_('Filters'),
+        help_text=_("StockItem query filters (comma-separated list of key=value pairs)"),
+        validators=[
+            validate_stock_item_report_filters
+        ]
+    )
+
+    include_installed = models.BooleanField(
+        default=False,
+        verbose_name=_('Include Installed Tests'),
+        help_text=_('Include test results for stock items installed inside assembled item')
+    )
 
     def matches_stock_item(self, item):
         """
         Test if this report template matches a given StockItem objects
         """
 
-        filters = validateFilterString(self.filters)
+        try:
+            filters = validateFilterString(self.filters)
+            items = stock.models.StockItem.objects.filter(**filters)
+        except (ValidationError, FieldError):
+            return False
 
-        items = StockItem.objects.filter(**filters)
+        # Ensure the provided StockItem object matches the filters
+        items = items.filter(pk=item.pk)
 
         return items.exists()
 
     def get_context_data(self, request):
+
+        stock_item = self.object_to_print
+
         return {
-            'stock_item': self.stock_item,
-            'part': self.stock_item.part,
-            'results': self.stock_item.testResultMap(),
-            'result_list': self.stock_item.testResultList()
+            'stock_item': stock_item,
+            'part': stock_item.part,
+            'results': stock_item.testResultMap(include_installed=self.include_installed),
+            'result_list': stock_item.testResultList(include_installed=self.include_installed)
         }
+
+
+class BuildReport(ReportTemplateBase):
+    """
+    Build order / work order report
+    """
+
+    @classmethod
+    def getSubdir(cls):
+        return 'build'
+
+    filters = models.CharField(
+        blank=True,
+        max_length=250,
+        verbose_name=_('Build Filters'),
+        help_text=_('Build query filters (comma-separated list of key=value pairs'),
+        validators=[
+            validate_build_report_filters,
+        ]
+    )
+
+    def get_context_data(self, request):
+        """
+        Custom context data for the build report
+        """
+
+        my_build = self.object_to_print
+
+        if not type(my_build) == build.models.Build:
+            raise TypeError('Provided model is not a Build object')
+
+        return {
+            'build': my_build,
+            'part': my_build.part,
+            'bom_items': my_build.part.get_bom_items(),
+            'reference': my_build.reference,
+            'quantity': my_build.quantity,
+        }
+
+
+class BillOfMaterialsReport(ReportTemplateBase):
+    """
+    Render a Bill of Materials against a Part object
+    """
+
+    @classmethod
+    def getSubdir(cls):
+        return 'bom'
+
+    filters = models.CharField(
+        blank=True,
+        max_length=250,
+        verbose_name=_('Part Filters'),
+        help_text=_('Part query filters (comma-separated list of key=value pairs'),
+        validators=[
+            validate_part_report_filters
+        ]
+    )
+
+    def get_context_data(self, request):
+
+        part = self.object_to_print
+
+        return {
+            'part': part,
+            'category': part.category,
+            'bom_items': part.get_bom_items(),
+        }
+
+
+class PurchaseOrderReport(ReportTemplateBase):
+    """
+    Render a report against a PurchaseOrder object
+    """
+
+    @classmethod
+    def getSubdir(cls):
+        return 'purchaseorder'
+    
+    filters = models.CharField(
+        blank=True,
+        max_length=250,
+        verbose_name=_('Filters'),
+        help_text=_('Purchase order query filters'),
+        validators=[
+            validate_purchase_order_filters,
+        ]
+    )
+
+    def get_context_data(self, request):
+
+        order = self.object_to_print
+
+        return {
+            'description': order.description,
+            'lines': order.lines,
+            'order': order,
+            'reference': order.reference,
+            'supplier': order.supplier,
+            'prefix': common.models.InvenTreeSetting.get_setting('PURCHASEORDER_REFERENCE_PREFIX'),
+            'title': str(order),
+        }
+
+
+class SalesOrderReport(ReportTemplateBase):
+    """
+    Render a report against a SalesOrder object
+    """
+
+    @classmethod
+    def getSubdir(cls):
+        return 'salesorder'
+
+    filters = models.CharField(
+        blank=True,
+        max_length=250,
+        verbose_name=_('Filters'),
+        help_text=_('Sales order query filters'),
+        validators=[
+            validate_sales_order_filters
+        ]
+    )
+
+    def get_context_data(self, request):
+
+        order = self.object_to_print
+
+        return {
+            'customer': order.customer,
+            'description': order.description,
+            'lines': order.lines,
+            'order': order,
+            'prefix': common.models.InvenTreeSetting.get_setting('SALESORDER_REFERENCE_PREFIX'),
+            'reference': order.reference,
+            'title': str(order),
+        }
+
+
+def rename_snippet(instance, filename):
+
+    filename = os.path.basename(filename)
+
+    path = os.path.join('report', 'snippets', filename)
+
+    # If the snippet file is the *same* filename as the one being uploaded,
+    # delete the original one from the media directory
+    if str(filename) == str(instance.snippet):
+        fullpath = os.path.join(settings.MEDIA_ROOT, path)
+        fullpath = os.path.abspath(fullpath)
+       
+        if os.path.exists(fullpath):
+            logger.info(f"Deleting existing snippet file: '{filename}'")
+            os.remove(fullpath)
+
+    return path
+
+
+class ReportSnippet(models.Model):
+    """
+    Report template 'snippet' which can be used to make templates
+    that can then be included in other reports.
+
+    Useful for 'common' template actions, sub-templates, etc
+    """
+
+    snippet = models.FileField(
+        upload_to=rename_snippet,
+        help_text=_('Report snippet file'),
+        validators=[FileExtensionValidator(allowed_extensions=['html', 'htm'])],
+    )
+
+    description = models.CharField(max_length=250, help_text=_("Snippet file description"))
 
 
 def rename_asset(instance, filename):
 
     filename = os.path.basename(filename)
 
-    return os.path.join('report', 'assets', filename)
+    path = os.path.join('report', 'assets', filename)
+
+    # If the asset file is the *same* filename as the one being uploaded,
+    # delete the original one from the media directory
+    if str(filename) == str(instance.asset):
+        fullpath = os.path.join(settings.MEDIA_ROOT, path)
+        fullpath = os.path.abspath(fullpath)
+
+        if os.path.exists(fullpath):
+            logger.info(f"Deleting existing asset file: '{filename}'")
+            os.remove(fullpath)
+
+    return path
 
 
 class ReportAsset(models.Model):

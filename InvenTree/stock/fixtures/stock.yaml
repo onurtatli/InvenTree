@@ -2,6 +2,7 @@
 
 # 4,000 screws in the dining room
 - model: stock.stockitem
+  pk: 1
   fields:
     part: 1
     location: 3
@@ -14,10 +15,23 @@
 
 # 5,000 screws in the bathroom
 - model: stock.stockitem
+  pk: 2
   fields:
     part: 1
     location: 2
     quantity: 5000
+    level: 0
+    tree_id: 0
+    lft: 0
+    rght: 0
+
+# Capacitor C_22N_0805 in 'Office'
+- model: stock.stockitem
+  pk: 11
+  fields:
+    part: 5
+    location: 4
+    quantity: 666
     level: 0
     tree_id: 0
     lft: 0
@@ -39,6 +53,7 @@
 - model: stock.stockitem
   pk: 100
   fields:
+    batch: "B1234"
     part: 25
     location: 7
     quantity: 10
@@ -52,6 +67,7 @@
   pk: 101
   fields:
     part: 25
+    batch: "B2345"
     location: 7
     quantity: 5
     level: 0
@@ -63,8 +79,9 @@
   pk: 102
   fields:
     part: 25
+    batch: 'ABCDE'
     location: 7
-    quantity: 3
+    quantity: 0
     level: 0
     tree_id: 0
     lft: 0
@@ -89,6 +106,7 @@
     part: 10001
     location: 7
     quantity: 5
+    batch: "AAA"
     level: 0
     tree_id: 0
     lft: 0
@@ -99,6 +117,7 @@
   fields:
     part: 10001
     location: 7
+    batch: "AAA"
     quantity: 1
     serial: 1
     level: 0
@@ -213,6 +232,7 @@
     tree_id: 0
     lft: 0
     rght: 0
+    expiry_date: "1990-10-10"
 
 - model: stock.stockitem
   pk: 521
@@ -225,6 +245,7 @@
     tree_id: 0
     lft: 0
     rght: 0
+    status: 60
 
 - model: stock.stockitem
   pk: 522
@@ -237,3 +258,5 @@
     tree_id: 0
     lft: 0
     rght: 0
+    expiry_date: "1990-10-10"
+    status: 70

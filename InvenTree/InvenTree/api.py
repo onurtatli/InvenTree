@@ -5,6 +5,8 @@ Main JSON interface views
 # -*- coding: utf-8 -*-
 from __future__ import unicode_literals
 
+import logging
+
 from django.utils.translation import ugettext as _
 from django.http import JsonResponse
 
@@ -16,12 +18,15 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .views import AjaxView
-from .version import inventreeVersion, inventreeInstanceName
+from .version import inventreeVersion, inventreeApiVersion, inventreeInstanceName
 
 from plugins import plugins as inventree_plugins
 
 
-print("Loading action plugins")
+logger = logging.getLogger(__name__)
+
+
+logger.info("Loading action plugins...")
 action_plugins = inventree_plugins.load_action_plugins()
 
 
@@ -30,15 +35,35 @@ class InfoView(AjaxView):
     Use to confirm that the server is running, etc.
     """
 
+    permission_classes = [permissions.AllowAny]
+
     def get(self, request, *args, **kwargs):
 
         data = {
             'server': 'InvenTree',
             'version': inventreeVersion(),
             'instance': inventreeInstanceName(),
+            'apiVersion': inventreeApiVersion(),
         }
 
         return JsonResponse(data)
+
+
+class NotFoundView(AjaxView):
+    """
+    Simple JSON view when accessing an invalid API view.
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, *args, **kwargs):
+
+        data = {
+            'details': _('API endpoint not found'),
+            'url': request.build_absolute_uri(),
+        }
+
+        return JsonResponse(data, status=404)
 
 
 class AttachmentMixin:

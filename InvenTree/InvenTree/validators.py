@@ -6,9 +6,20 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 
-from common.models import InvenTreeSetting
+from moneyed import CURRENCIES
+
+import common.models
 
 import re
+
+
+def validate_currency_code(code):
+    """
+    Check that a given code is a valid currency code.
+    """
+
+    if code not in CURRENCIES:
+        raise ValidationError(_('Not a valid currency code'))
 
 
 def allowable_url_schemes():
@@ -43,13 +54,55 @@ def validate_part_name(value):
 def validate_part_ipn(value):
     """ Validate the Part IPN against regex rule """
 
-    pattern = InvenTreeSetting.get_setting('part_ipn_regex')
+    pattern = common.models.InvenTreeSetting.get_setting('PART_IPN_REGEX')
 
     if pattern:
         match = re.search(pattern, value)
 
         if match is None:
             raise ValidationError(_('IPN must match regex pattern') + " '{pat}'".format(pat=pattern))
+
+
+def validate_build_order_reference(value):
+    """
+    Validate the 'reference' field of a BuildOrder
+    """
+
+    pattern = common.models.InvenTreeSetting.get_setting('BUILDORDER_REFERENCE_REGEX')
+
+    if pattern:
+        match = re.search(pattern, value)
+
+        if match is None:
+            raise ValidationError(_('Reference must match pattern') + f" '{pattern}'")
+
+
+def validate_purchase_order_reference(value):
+    """
+    Validate the 'reference' field of a PurchaseOrder
+    """
+
+    pattern = common.models.InvenTreeSetting.get_setting('PURCHASEORDER_REFERENCE_REGEX')
+
+    if pattern:
+        match = re.search(pattern, value)
+
+        if match is None:
+            raise ValidationError(_('Reference must match pattern') + f" '{pattern}'")
+
+
+def validate_sales_order_reference(value):
+    """
+    Validate the 'reference' field of a SalesOrder
+    """
+
+    pattern = common.models.InvenTreeSetting.get_setting('SALESORDER_REFERENCE_REGEX')
+
+    if pattern:
+        match = re.search(pattern, value)
+
+        if match is None:
+            raise ValidationError(_('Reference must match pattern') + f" '{pattern}'")
 
 
 def validate_tree_name(value):

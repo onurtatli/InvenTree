@@ -7,7 +7,7 @@ from __future__ import unicode_literals
 
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters
-from rest_framework import generics, permissions
+from rest_framework import generics
 
 from django.conf.urls import url, include
 from django.db.models import Q
@@ -40,10 +40,6 @@ class CompanyList(generics.ListCreateAPIView):
 
         return queryset
     
-    permission_classes = [
-        permissions.IsAuthenticated,
-    ]
-
     filter_backends = [
         DjangoFilterBackend,
         filters.SearchFilter,
@@ -60,10 +56,13 @@ class CompanyList(generics.ListCreateAPIView):
     search_fields = [
         'name',
         'description',
+        'website',
     ]
 
     ordering_fields = [
         'name',
+        'parts_supplied',
+        'parts_manufactured',
     ]
 
     ordering = 'name'
@@ -82,10 +81,6 @@ class CompanyDetail(generics.RetrieveUpdateDestroyAPIView):
 
         return queryset
     
-    permission_classes = [
-        permissions.IsAuthenticated,
-    ]
-
 
 class SupplierPartList(generics.ListCreateAPIView):
     """ API endpoint for list view of SupplierPart object
@@ -139,6 +134,13 @@ class SupplierPartList(generics.ListCreateAPIView):
         if part is not None:
             queryset = queryset.filter(part=part)
 
+        # Filter by 'active' status of the part?
+        active = params.get('active', None)
+
+        if active is not None:
+            active = str2bool(active)
+            queryset = queryset.filter(part__active=active)
+
         return queryset
 
     def get_serializer(self, *args, **kwargs):
@@ -170,10 +172,6 @@ class SupplierPartList(generics.ListCreateAPIView):
 
     serializer_class = SupplierPartSerializer
 
-    permission_classes = [
-        permissions.IsAuthenticated,
-    ]
-
     filter_backends = [
         DjangoFilterBackend,
         filters.SearchFilter,
@@ -189,6 +187,8 @@ class SupplierPartList(generics.ListCreateAPIView):
         'manufacturer__name',
         'description',
         'MPN',
+        'part__name',
+        'part__description',
     ]
 
 
@@ -202,7 +202,6 @@ class SupplierPartDetail(generics.RetrieveUpdateDestroyAPIView):
 
     queryset = SupplierPart.objects.all()
     serializer_class = SupplierPartSerializer
-    permission_classes = (permissions.IsAuthenticated,)
 
     read_only_fields = [
     ]
@@ -217,10 +216,6 @@ class SupplierPriceBreakList(generics.ListCreateAPIView):
 
     queryset = SupplierPriceBreak.objects.all()
     serializer_class = SupplierPriceBreakSerializer
-
-    permission_classes = [
-        permissions.IsAuthenticated,
-    ]
 
     filter_backends = [
         DjangoFilterBackend,

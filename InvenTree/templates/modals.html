@@ -1,3 +1,12 @@
+{% load i18n %}
+
+<div class='modal fade modal-image' role='dialog' id='modal-image-dialog'>
+  <span class='modal-close' id='modal-image-close'>&times;</span>
+
+  <img class='modal-image-content' id='modal-image'>
+
+</div>
+
 <div class='modal fade modal-fixed-footer modal-primary' tabindex='-1' role='dialog' id='modal-form'>
     <div class='modal-dialog'>
         <div class='modal-content'>
@@ -5,13 +14,19 @@
               <button type="button" class="close" data-dismiss="modal" aria-label="Close">
                 <span aria-hidden="true">&times;</span>
               </button>
-              <h3 id='modal-title'>Form Title Here</h3>
+              <h3 id='modal-title'><i>Form Title Here</i></h3>
             </div>
-            <div class='modal-form-content'>
+            <div class='modal-form-content-wrapper'>
+              <div class='alert alert-block alert-danger' id='form-validation-warning' style='display: none;'>
+                {% trans "Form errors exist" %}
+              </div>
+              <div class='modal-form-content'>
+                <!-- Form content will be injected here-->
+              </div>
             </div>
             <div class='modal-footer'>
-                <button type='button' class='btn btn-default' id='modal-form-close' data-dismiss='modal'>Close</button>
-                <button type='button' class='btn btn-primary' id='modal-form-submit'>Submit</button>
+                <button type='button' class='btn btn-default' id='modal-form-close' data-dismiss='modal'>{% trans "Close" %}</button>
+                <button type='button' class='btn btn-primary' id='modal-form-submit'>{% trans "Submit" %}</button>
             </div>
         </div>
     </div>
@@ -24,13 +39,18 @@
                   <button type="button" class="close" data-dismiss="modal" aria-label="Close">
                     <span aria-hidden="true">&times;</span>
                   </button>
-                  <h3 id='modal-title'>Form Title Here</h3>
+                  <h3 id='modal-title'><i>Form Title Here</i></h3>
                 </div>
-                <div class='modal-form-content'>
+                <div class='modal-form-content-wrapper'>
+                  <div class='alert alert-block alert-danger' id='form-validation-warning' style="display: none;">
+                    {% trans "Form errors exist" %}
+                  </div>
+                  <div class='modal-form-content'>
+                  </div>
                 </div>
                 <div class='modal-footer'>
-                    <button type='button' class='btn btn-default' id='modal-form-close' data-dismiss='modal'>Close</button>
-                    <button type='button' class='btn btn-primary' id='modal-form-submit'>Submit</button>
+                    <button type='button' class='btn btn-default' id='modal-form-close' data-dismiss='modal'>{% trans "Close" %}</button>
+                    <button type='button' class='btn btn-primary' id='modal-form-submit'>{% trans "Submit" %}</button>
                 </div>
             </div>
         </div>
@@ -49,8 +69,8 @@
                 <div class='modal-form-content'>
                 </div>
                 <div class='modal-footer'>
-                    <button type='button' class='btn btn-default' id='modal-form-cancel' data-dismiss='modal'>Cancel</button>
-                    <button type='button' class='btn btn-primary' id='modal-form-accept'>Accept</button>
+                    <button type='button' class='btn btn-default' id='modal-form-cancel' data-dismiss='modal'>{% trans "Cancel" %}</button>
+                    <button type='button' class='btn btn-primary' id='modal-form-accept'>{% trans "Accept" %}</button>
                 </div>
             </div>
         </div>
@@ -65,10 +85,12 @@
               </button>
               <h3 id='modal-title'>Alert Information</h3>
             </div>
-            <div class='modal-form-content'>
+            <div class='modal-form-content-wrapper'>
+              <div class='modal-form-content'>
+              </div>
             </div>
             <div class='modal-footer'>
-                <button type='button' class='btn btn-default' data-dismiss='modal'>Close</button>
+                <button type='button' class='btn btn-default' data-dismiss='modal'>{% trans "Close" %}</button>
             </div>
         </div>
     </div>

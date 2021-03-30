@@ -6,7 +6,7 @@ JSON API for the Order app
 from __future__ import unicode_literals
 
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import generics, permissions
+from rest_framework import generics
 from rest_framework import filters
 
 from django.conf.urls import url, include
@@ -80,6 +80,17 @@ class POList(generics.ListCreateAPIView):
             else:
                 queryset = queryset.exclude(status__in=PurchaseOrderStatus.OPEN)
 
+        # Filter by 'overdue' status
+        overdue = params.get('overdue', None)
+
+        if overdue is not None:
+            overdue = str2bool(overdue)
+
+            if overdue:
+                queryset = queryset.filter(PurchaseOrder.OVERDUE_FILTER)
+            else:
+                queryset = queryset.exclude(PurchaseOrder.OVERDUE_FILTER)
+
         # Special filtering for 'status' field
         status = params.get('status', None)
 
@@ -107,11 +118,14 @@ class POList(generics.ListCreateAPIView):
             except (ValueError, SupplierPart.DoesNotExist):
                 pass
 
-        return queryset
+        # Filter by 'date range'
+        min_date = params.get('min_date', None)
+        max_date = params.get('max_date', None)
 
-    permission_classes = [
-        permissions.IsAuthenticated,
-    ]
+        if min_date is not None and max_date is not None:
+            queryset = PurchaseOrder.filterByDate(queryset, min_date, max_date)
+
+        return queryset
 
     filter_backends = [
         DjangoFilterBackend,
@@ -123,9 +137,20 @@ class POList(generics.ListCreateAPIView):
         'supplier',
     ]
 
+    search_fields = [
+        'reference',
+        'supplier__name',
+        'supplier_reference',
+        'description',
+    ]
+
     ordering_fields = [
         'creation_date',
         'reference',
+        'supplier__name',
+        'target_date',
+        'line_items',
+        'status',
     ]
 
     ordering = '-creation_date'
@@ -162,10 +187,6 @@ class PODetail(generics.RetrieveUpdateAPIView):
 
         return queryset
 
-    permission_classes = [
-        permissions.IsAuthenticated
-    ]
-
 
 class POLineItemList(generics.ListCreateAPIView):
     """ API endpoint for accessing a list of POLineItem objects
@@ -188,12 +209,27 @@ class POLineItemList(generics.ListCreateAPIView):
 
         return self.serializer_class(*args, **kwargs)
 
-    permission_classes = [
-        permissions.IsAuthenticated,
-    ]
-
     filter_backends = [
         DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter
+    ]
+
+    ordering_fields = [
+        'part__part__name',
+        'part__MPN',
+        'part__SKU',
+        'reference',
+        'quantity',
+        'received',
+    ]
+
+    search_fields = [
+        'part__part__name',
+        'part__part__description',
+        'part__MPN',
+        'part__SKU',
+        'reference',
     ]
 
     filter_fields = [
@@ -207,10 +243,6 @@ class POLineItemDetail(generics.RetrieveUpdateAPIView):
 
     queryset = PurchaseOrderLineItem
     serializer_class = POLineItemSerializer
-
-    permission_classes = [
-        permissions.IsAuthenticated,
-    ]
 
 
 class SOAttachmentList(generics.ListCreateAPIView, AttachmentMixin):
@@ -282,6 +314,17 @@ class SOList(generics.ListCreateAPIView):
             else:
                 queryset = queryset.exclude(status__in=SalesOrderStatus.OPEN)
 
+        # Filter by 'overdue' status
+        overdue = params.get('overdue', None)
+
+        if overdue is not None:
+            overdue = str2bool(overdue)
+
+            if overdue:
+                queryset = queryset.filter(SalesOrder.OVERDUE_FILTER)
+            else:
+                queryset = queryset.exclude(SalesOrder.OVERDUE_FILTER)
+
         status = params.get('status', None)
 
         if status is not None:
@@ -298,11 +341,14 @@ class SOList(generics.ListCreateAPIView):
             except (Part.DoesNotExist, ValueError):
                 pass
 
-        return queryset
+        # Filter by 'date range'
+        min_date = params.get('min_date', None)
+        max_date = params.get('max_date', None)
 
-    permission_classes = [
-        permissions.IsAuthenticated
-    ]
+        if min_date is not None and max_date is not None:
+            queryset = SalesOrder.filterByDate(queryset, min_date, max_date)
+
+        return queryset
 
     filter_backends = [
         DjangoFilterBackend,
@@ -316,7 +362,20 @@ class SOList(generics.ListCreateAPIView):
 
     ordering_fields = [
         'creation_date',
-        'reference'
+        'reference',
+        'customer__name',
+        'customer_reference',
+        'status',
+        'target_date',
+        'line_items',
+        'shipment_date',
+    ]
+
+    search_fields = [
+        'customer__name',
+        'reference',
+        'description',
+        'customer_reference',
     ]
 
     ordering = '-creation_date'
@@ -350,8 +409,6 @@ class SODetail(generics.RetrieveUpdateAPIView):
         queryset = SalesOrderSerializer.annotate_queryset(queryset)
 
         return queryset
-
-    permission_classes = [permissions.IsAuthenticated]
 
 
 class SOLineItemList(generics.ListCreateAPIView):
@@ -398,9 +455,23 @@ class SOLineItemList(generics.ListCreateAPIView):
 
         return queryset
 
-    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter
+    ]
 
-    filter_backends = [DjangoFilterBackend]
+    ordering_fields = [
+        'part__name',
+        'quantity',
+        'reference',
+    ]
+
+    search_fields = [
+        'part__name',
+        'quantity',
+        'reference',
+    ]
 
     filter_fields = [
         'order',
@@ -413,8 +484,6 @@ class SOLineItemDetail(generics.RetrieveUpdateAPIView):
 
     queryset = SalesOrderLineItem.objects.all()
     serializer_class = SOLineItemSerializer
-
-    permission_classes = [permissions.IsAuthenticated]
 
 
 class POAttachmentList(generics.ListCreateAPIView, AttachmentMixin):

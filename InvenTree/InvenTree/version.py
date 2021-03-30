@@ -3,20 +3,28 @@ Provides information on the current InvenTree version
 """
 
 import subprocess
-from common.models import InvenTreeSetting
 import django
 
-INVENTREE_SW_VERSION = "0.1.3 pre"
+import common.models
+
+INVENTREE_SW_VERSION = "0.1.8 pre"
+
+# Increment this number whenever there is a significant change to the API that any clients need to know about
+INVENTREE_API_VERSION = 2
 
 
 def inventreeInstanceName():
     """ Returns the InstanceName settings for the current database """
-    return InvenTreeSetting.get_setting("InstanceName", "")
+    return common.models.InvenTreeSetting.get_setting("INVENTREE_INSTANCE", "")
 
 
 def inventreeVersion():
     """ Returns the InvenTree version string """
     return INVENTREE_SW_VERSION
+
+
+def inventreeApiVersion():
+    return INVENTREE_API_VERSION
 
 
 def inventreeDjangoVersion():

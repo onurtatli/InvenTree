@@ -12,6 +12,9 @@ from mptt.fields import TreeNodeChoiceField
 
 from InvenTree.forms import HelperForm
 from InvenTree.fields import RoundingDecimalFormField
+from InvenTree.fields import DatePickerFormField
+
+import part.models
 
 from stock.models import StockLocation
 from .models import PurchaseOrder, PurchaseOrderLineItem, PurchaseOrderAttachment
@@ -21,7 +24,7 @@ from .models import SalesOrderAllocation
 
 class IssuePurchaseOrderForm(HelperForm):
 
-    confirm = forms.BooleanField(required=False, help_text=_('Place order'))
+    confirm = forms.BooleanField(required=True, initial=False, help_text=_('Place order'))
 
     class Meta:
         model = PurchaseOrder
@@ -32,7 +35,7 @@ class IssuePurchaseOrderForm(HelperForm):
 
 class CompletePurchaseOrderForm(HelperForm):
 
-    confirm = forms.BooleanField(required=False, help_text=_("Mark order as complete"))
+    confirm = forms.BooleanField(required=True, help_text=_("Mark order as complete"))
 
     class Meta:
         model = PurchaseOrder
@@ -43,7 +46,7 @@ class CompletePurchaseOrderForm(HelperForm):
 
 class CancelPurchaseOrderForm(HelperForm):
 
-    confirm = forms.BooleanField(required=False, help_text=_('Cancel order'))
+    confirm = forms.BooleanField(required=True, help_text=_('Cancel order'))
 
     class Meta:
         model = PurchaseOrder
@@ -54,7 +57,7 @@ class CancelPurchaseOrderForm(HelperForm):
 
 class CancelSalesOrderForm(HelperForm):
 
-    confirm = forms.BooleanField(required=False, help_text=_('Cancel order'))
+    confirm = forms.BooleanField(required=True, help_text=_('Cancel order'))
 
     class Meta:
         model = SalesOrder
@@ -65,7 +68,7 @@ class CancelSalesOrderForm(HelperForm):
 
 class ShipSalesOrderForm(HelperForm):
 
-    confirm = forms.BooleanField(required=False, help_text=_('Ship order'))
+    confirm = forms.BooleanField(required=True, help_text=_('Ship order'))
 
     class Meta:
         model = SalesOrder
@@ -93,13 +96,18 @@ class EditPurchaseOrderForm(HelperForm):
         self.field_prefix = {
             'reference': 'PO',
             'link': 'fa-link',
+            'target_date': 'fa-calendar-alt',
         }
 
         self.field_placeholder = {
-            'reference': _('Enter purchase order number'),
+            'reference': _('Purchase Order reference'),
         }
 
         super().__init__(*args, **kwargs)
+
+    target_date = DatePickerFormField(
+        help_text=_('Target date for order delivery. Order will be overdue after this date.'),
+    )
 
     class Meta:
         model = PurchaseOrder
@@ -108,7 +116,9 @@ class EditPurchaseOrderForm(HelperForm):
             'supplier',
             'supplier_reference',
             'description',
+            'target_date',
             'link',
+            'responsible',
         ]
 
 
@@ -120,6 +130,7 @@ class EditSalesOrderForm(HelperForm):
         self.field_prefix = {
             'reference': 'SO',
             'link': 'fa-link',
+            'target_date': 'fa-calendar-alt',
         }
 
         self.field_placeholder = {
@@ -128,6 +139,10 @@ class EditSalesOrderForm(HelperForm):
 
         super().__init__(*args, **kwargs)
 
+    target_date = DatePickerFormField(
+        help_text=_('Target date for order completion. Order will be overdue after this date.'),
+    )
+
     class Meta:
         model = SalesOrder
         fields = [
@@ -135,7 +150,9 @@ class EditSalesOrderForm(HelperForm):
             'customer',
             'customer_reference',
             'description',
-            'link'
+            'target_date',
+            'link',
+            'responsible',
         ]
 
 
@@ -175,6 +192,7 @@ class EditPurchaseOrderLineItemForm(HelperForm):
             'part',
             'quantity',
             'reference',
+            'purchase_price',
             'notes',
         ]
 
@@ -195,7 +213,65 @@ class EditSalesOrderLineItemForm(HelperForm):
         ]
 
 
+class AllocateSerialsToSalesOrderForm(forms.Form):
+    """
+    Form for assigning stock to a sales order,
+    by serial number lookup
+    """
+
+    line = forms.ModelChoiceField(
+        queryset=SalesOrderLineItem.objects.all(),
+    )
+
+    part = forms.ModelChoiceField(
+        queryset=part.models.Part.objects.all(),
+    )
+
+    serials = forms.CharField(
+        label=_("Serial Numbers"),
+        required=True,
+        help_text=_('Enter stock item serial numbers'),
+    )
+
+    quantity = forms.IntegerField(
+        label=_('Quantity'),
+        required=True,
+        help_text=_('Enter quantity of stock items'),
+        initial=1,
+        min_value=1
+    )
+
+    class Meta:
+
+        fields = [
+            'line',
+            'part',
+            'serials',
+            'quantity',
+        ]
+
+
+class CreateSalesOrderAllocationForm(HelperForm):
+    """
+    Form for creating a SalesOrderAllocation item.
+    """
+
+    quantity = RoundingDecimalFormField(max_digits=10, decimal_places=5)
+
+    class Meta:
+        model = SalesOrderAllocation
+
+        fields = [
+            'line',
+            'item',
+            'quantity',
+        ]
+
+
 class EditSalesOrderAllocationForm(HelperForm):
+    """
+    Form for editing a SalesOrderAllocation item
+    """
 
     quantity = RoundingDecimalFormField(max_digits=10, decimal_places=5)
 

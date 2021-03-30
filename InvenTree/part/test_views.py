@@ -3,8 +3,9 @@
 from django.test import TestCase
 from django.urls import reverse
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 
-from .models import Part
+from .models import Part, PartRelated
 
 
 class PartViewTestCase(TestCase):
@@ -22,8 +23,26 @@ class PartViewTestCase(TestCase):
         super().setUp()
 
         # Create a user
-        User = get_user_model()
-        User.objects.create_user('username', 'user@email.com', 'password')
+        user = get_user_model()
+        
+        self.user = user.objects.create_user(
+            username='username',
+            email='user@email.com',
+            password='password'
+        )
+
+        # Put the user into a group with the correct permissions
+        group = Group.objects.create(name='mygroup')
+        self.user.groups.add(group)
+
+        # Give the group *all* the permissions!
+        for rule in group.rule_sets.all():
+            rule.can_view = True
+            rule.can_change = True
+            rule.can_add = True
+            rule.can_delete = True
+
+            rule.save()
 
         self.client.login(username='username', password='password')
 
@@ -78,6 +97,56 @@ class PartDetailTest(PartViewTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.context['editing_enabled'])
 
+    def test_part_detail_from_ipn(self):
+        """
+        Test that we can retrieve a part detail page from part IPN:
+        - if no part with matching IPN -> return part index
+        - if unique IPN match -> return part detail page
+        - if multiple IPN matches -> return part index
+        """
+        ipn_test = 'PART-000000-AA'
+        pk = 1
+
+        def test_ipn_match(index_result=False, detail_result=False):
+            index_redirect = False
+            detail_redirect = False
+
+            response = self.client.get(reverse('part-detail-from-ipn', args=(ipn_test,)))
+
+            # Check for PartIndex redirect
+            try:
+                if response.url == '/part/':
+                    index_redirect = True
+            except AttributeError:
+                pass
+
+            # Check for PartDetail redirect
+            try:
+                if response.context['part'].pk == pk:
+                    detail_redirect = True
+            except TypeError:
+                pass
+
+            self.assertEqual(index_result, index_redirect)
+            self.assertEqual(detail_result, detail_redirect)
+
+        # Test no match
+        test_ipn_match(index_result=True, detail_result=False)
+
+        # Test unique match
+        part = Part.objects.get(pk=pk)
+        part.IPN = ipn_test
+        part.save()
+
+        test_ipn_match(index_result=False, detail_result=True)
+
+        # Test multiple matches
+        part = Part.objects.get(pk=pk + 1)
+        part.IPN = ipn_test
+        part.save()
+
+        test_ipn_match(index_result=True, detail_result=False)
+
     def test_bom_download(self):
         """ Test downloading a BOM for a valid part """
 
@@ -90,11 +159,13 @@ class PartTests(PartViewTestCase):
     """ Tests for Part forms """
 
     def test_part_edit(self):
+
         response = self.client.get(reverse('part-edit', args=(1,)), HTTP_X_REQUESTED_WITH='XMLHttpRequest')
-        self.assertEqual(response.status_code, 200)
 
         keys = response.context.keys()
         data = str(response.content)
+
+        self.assertEqual(response.status_code, 200)
 
         self.assertIn('part', keys)
         self.assertIn('csrf_token', keys)
@@ -131,6 +202,36 @@ class PartTests(PartViewTestCase):
         self.assertEqual(response.status_code, 200)
 
 
+class PartRelatedTests(PartViewTestCase):
+
+    def test_valid_create(self):
+        """ test creation of a related part """
+
+        # Test GET view
+        response = self.client.get(reverse('part-related-create'), {'part': 1},
+                                   HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(response.status_code, 200)
+
+        # Test POST view with valid form data
+        response = self.client.post(reverse('part-related-create'), {'part_1': 1, 'part_2': 2},
+                                    HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertContains(response, '"form_valid": true', status_code=200)
+
+        # Try to create the same relationship with part_1 and part_2 pks reversed
+        response = self.client.post(reverse('part-related-create'), {'part_1': 2, 'part_2': 1},
+                                    HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertContains(response, '"form_valid": false', status_code=200)
+
+        # Try to create part related to itself
+        response = self.client.post(reverse('part-related-create'), {'part_1': 1, 'part_2': 1},
+                                    HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertContains(response, '"form_valid": false', status_code=200)
+        
+        # Check final count
+        n = PartRelated.objects.all().count()
+        self.assertEqual(n, 1)
+
+
 class PartAttachmentTests(PartViewTestCase):
 
     def test_valid_create(self):
@@ -138,6 +239,8 @@ class PartAttachmentTests(PartViewTestCase):
 
         response = self.client.get(reverse('part-attachment-create'), {'part': 1}, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
         self.assertEqual(response.status_code, 200)
+
+        # TODO - Create a new attachment using this view
 
     def test_invalid_create(self):
         """ test creation of an attachment for an invalid part """
@@ -167,14 +270,12 @@ class PartQRTest(PartViewTestCase):
         data = str(response.content)
 
         self.assertIn('Part QR Code', data)
-        self.assertIn('<img class=', data)
+        self.assertIn('<img src=', data)
 
     def test_invalid_part(self):
         response = self.client.get(reverse('part-qr', args=(9999,)), HTTP_X_REQUESTED_WITH='XMLHttpRequest')
 
-        data = str(response.content)
-        
-        self.assertIn('Error:', data)
+        self.assertEqual(response.status_code, 200)
 
 
 class CategoryTest(PartViewTestCase):
